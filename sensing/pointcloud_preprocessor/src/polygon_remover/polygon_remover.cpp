@@ -20,11 +20,14 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
 : Filter("PolygonRemover", options)
 {
   pub_marker_ptr_ = this->create_publisher<visualization_msgs::msg::Marker>("Removed_polygon", 10);
-
-  this->declare_parameter<std::vector<double>>("polygon_vertices");
-  this->get_parameter("polygon_vertices", param);
   this->declare_parameter<bool>("will_visualize");
   this->get_parameter("will_visualize", will_visualize_);
+  remove_outside_ = declare_parameter("remove_outside", false);
+  const auto working_mode = declare_parameter("working_mode", "PolygonSub");
+  if (working_mode == "Static")
+  {
+  this->declare_parameter<std::vector<double>>("polygon_vertices");
+  this->get_parameter("polygon_vertices", param);
   polygon_vertices_ = param.as_double_array();
   if (polygon_vertices_.size() % 2 != 0) {
     throw std::length_error(
@@ -46,6 +49,15 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
     polygon_->points.emplace_back(make_point(p_x, p_y, 0.0F));
   }
   this->update_polygon(polygon_);
+  }
+  else if (working_mode == "PolygonSub")
+  {
+    sub_poly_ = create_subscription<geometry_msgs::msg::Polygon>("polygon_sub", rclcpp::SensorDataQoS(), [&](geometry_msgs::msg::Polygon::SharedPtr msg){on_polygon(msg);});
+  }
+  else
+  {
+    throw std::logic_error("working_mode can only be either Static or PolygonSub.");
+  }
 }
 
 void PolygonRemoverComponent::filter(
@@ -64,11 +76,18 @@ void PolygonRemoverComponent::filter(
   }
 }
 
+void PolygonRemoverComponent::on_polygon(geometry_msgs::msg::Polygon::SharedPtr msg)
+{
+  update_polygon(msg);
+}
+
 void PolygonRemoverComponent::update_polygon(
   const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in)
 {
+  polygon_cgal_.clear();
   pointcloud_preprocessor::utils::to_cgal_polygon(*polygon_in, polygon_cgal_);
   if (will_visualize_) {
+    marker_.points.clear();
     marker_.ns = "";
     marker_.id = 0;
     marker_.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -130,7 +149,7 @@ sensor_msgs::msg::PointCloud2 PolygonRemoverComponent::remove_updated_polygon_fr
 
   PointCloud2 cloud_out;
   pointcloud_preprocessor::utils::remove_polygon_cgal_from_cloud(
-    *cloud_in, polygon_cgal_, cloud_out);
+    *cloud_in, polygon_cgal_, cloud_out, remove_outside_);
   return cloud_out;
 }
 }  // namespace pointcloud_preprocessor

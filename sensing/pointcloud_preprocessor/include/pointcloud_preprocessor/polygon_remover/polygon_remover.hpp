@@ -36,6 +36,7 @@ protected:
     const PointCloud2ConstPtr & input, const IndicesPtr & indices, PointCloud2 & output);
 
   void publishRemovedPolygon();
+  void on_polygon(geometry_msgs::msg::Polygon::SharedPtr msg);
 
   void update_polygon(const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in);
   static PolygonCgal polygon_geometry_to_cgal(
@@ -49,12 +50,14 @@ private:
   std::vector<double> polygon_vertices_;
   geometry_msgs::msg::Polygon::SharedPtr polygon_;
 
-  bool polygon_is_initialized_;
+  bool polygon_is_initialized_ {false};
   bool will_visualize_;
+  bool remove_outside_;
   PolygonCgal polygon_cgal_;
   visualization_msgs::msg::Marker marker_;
 
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_marker_ptr_;
+  rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr sub_poly_;
 
 public:
   PCL_MAKE_ALIGNED_OPERATOR_NEW
