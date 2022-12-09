@@ -24,7 +24,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
+using namespace std;
 namespace autoware
 {
 namespace motion
@@ -98,13 +100,20 @@ MpcLateralController::MpcLateralController(rclcpp::Node & node) : node_{&node}
     vehicle_model_ptr = std::make_shared<trajectory_follower::KinematicsBicycleModelNoDelay>(
       wheelbase, m_mpc.m_steer_lim);
   } else if (vehicle_model_type == "dynamics") {
-    const float64_t mass_fl = node_->declare_parameter<float64_t>("vehicle.mass_fl");
-    const float64_t mass_fr = node_->declare_parameter<float64_t>("vehicle.mass_fr");
-    const float64_t mass_rl = node_->declare_parameter<float64_t>("vehicle.mass_rl");
-    const float64_t mass_rr = node_->declare_parameter<float64_t>("vehicle.mass_rr");
-    const float64_t cf = node_->declare_parameter<float64_t>("vehicle.cf");
-    const float64_t cr = node_->declare_parameter<float64_t>("vehicle.cr");
-
+    RCLCPP_ERROR(node_->get_logger(), "Params defined start");
+    // const float64_t mass_fl = node_->declare_parameter<float64_t>("vehicle.mass_fl");
+    // const float64_t mass_fr = node_->declare_parameter<float64_t>("vehicle.mass_fr");
+    // const float64_t mass_rl = node_->declare_parameter<float64_t>("vehicle.mass_rl");
+    // const float64_t mass_rr = node_->declare_parameter<float64_t>("vehicle.mass_rr");
+    // const float64_t cf = node_->declare_parameter<float64_t>("vehicle.cf");
+    // const float64_t cr = node_->declare_parameter<float64_t>("vehicle.cr");
+    const float64_t mass_fl = vehicle_info.mass_fl;
+    const float64_t mass_fr = vehicle_info.mass_fr;
+    const float64_t mass_rl = vehicle_info.mass_rl;
+    const float64_t mass_rr = vehicle_info.mass_rr;
+    const float64_t cf = vehicle_info.cf;
+    const float64_t cr = vehicle_info.cr;
+    RCLCPP_ERROR(node_->get_logger(), "Params defined correctly");
     // vehicle_model_ptr is only assigned in ctor, so parameter value have to be passed at init time
     // // NOLINT
     vehicle_model_ptr = std::make_shared<trajectory_follower::DynamicsBicycleModel>(
@@ -189,10 +198,10 @@ boost::optional<LateralOutput> MpcLateralController::run()
     m_ctrl_cmd_prev = getInitialControlCommand();
     m_is_ctrl_cmd_prev_initialized = true;
   }
-
+  // cout << "Odometery data : " << m_current_odometry_ptr->pose.pose.position.x << " " << m_current_odometry_ptr->pose.pose.position.y << endl;
   const bool8_t is_mpc_solved = m_mpc.calculateMPC(
     *m_current_steering_ptr, m_current_odometry_ptr->twist.twist.linear.x, m_current_pose_ptr->pose,
-    ctrl_cmd, predicted_traj, diagnostic);
+    ctrl_cmd, predicted_traj, diagnostic, m_current_odometry_ptr);
 
   publishPredictedTraj(predicted_traj);
   publishDiagnostic(diagnostic);
@@ -345,6 +354,7 @@ bool8_t MpcLateralController::updateCurrentPose()
   ps.pose.position.y = transform.transform.translation.y;
   ps.pose.position.z = transform.transform.translation.z;
   ps.pose.orientation = transform.transform.rotation;
+  // cout << "Got x y : " << transform.transform.translation.x << " " << transform.transform.translation.y << endl;
   m_current_pose_ptr = std::make_shared<geometry_msgs::msg::PoseStamped>(ps);
   return true;
 }

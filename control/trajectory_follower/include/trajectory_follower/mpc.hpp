@@ -34,6 +34,7 @@
 #include "trajectory_follower/vehicle_model/vehicle_model_bicycle_kinematics.hpp"
 #include "trajectory_follower/vehicle_model/vehicle_model_bicycle_kinematics_no_delay.hpp"
 #include "trajectory_follower/visibility_control.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 
 #include "autoware_auto_control_msgs/msg/ackermann_lateral_command.hpp"
 #include "autoware_auto_planning_msgs/msg/trajectory.hpp"
@@ -173,6 +174,8 @@ private:
   float64_t m_lateral_error_prev = 0.0;
   //!< @brief previous lateral error for derivative
   float64_t m_yaw_error_prev = 0.0;
+  float64_t m_dlat_prev = 0.0;
+  float64_t m_dyaw_prev = 0.0;
   //!< @brief previous predicted steering
   std::shared_ptr<float64_t> m_steer_prediction_prev;
   //!< @brief previous computation time
@@ -387,7 +390,8 @@ public:
     const float64_t current_velocity, const geometry_msgs::msg::Pose & current_pose,
     autoware_auto_control_msgs::msg::AckermannLateralCommand & ctrl_cmd,
     autoware_auto_planning_msgs::msg::Trajectory & predicted_traj,
-    autoware_auto_system_msgs::msg::Float32MultiArrayDiagnostic & diagnostic);
+    autoware_auto_system_msgs::msg::Float32MultiArrayDiagnostic & diagnostic,
+    nav_msgs::msg::Odometry::SharedPtr & m_current_odometry_ptr);
   /**
    * @brief set the reference trajectory to follow
    */

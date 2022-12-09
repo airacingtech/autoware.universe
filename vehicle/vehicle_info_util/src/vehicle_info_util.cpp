@@ -50,6 +50,14 @@ VehicleInfoUtil::VehicleInfoUtil(rclcpp::Node & node)
   vehicle_info_.right_overhang_m = getParameter<double>(node, "right_overhang");
   vehicle_info_.vehicle_height_m = getParameter<double>(node, "vehicle_height");
   vehicle_info_.max_steer_angle_rad = getParameter<double>(node, "max_steer_angle");
+  vehicle_info_.mass_kg = getParameter<double>(node, "mass_kg");
+  vehicle_info_.mass_fl = getParameter<double>(node, "mass_fl");
+  vehicle_info_.mass_fr = getParameter<double>(node, "mass_fr");
+  vehicle_info_.mass_rl = getParameter<double>(node, "mass_rl");
+  vehicle_info_.mass_rr = getParameter<double>(node, "mass_rr");
+  vehicle_info_.cf = getParameter<double>(node, "cf");
+  vehicle_info_.cr = getParameter<double>(node, "cr");
+
 }
 
 VehicleInfo VehicleInfoUtil::getVehicleInfo()
@@ -58,7 +66,8 @@ VehicleInfo VehicleInfoUtil::getVehicleInfo()
     vehicle_info_.wheel_radius_m, vehicle_info_.wheel_width_m, vehicle_info_.wheel_base_m,
     vehicle_info_.wheel_tread_m, vehicle_info_.front_overhang_m, vehicle_info_.rear_overhang_m,
     vehicle_info_.left_overhang_m, vehicle_info_.right_overhang_m, vehicle_info_.vehicle_height_m,
-    vehicle_info_.max_steer_angle_rad);
+    vehicle_info_.max_steer_angle_rad, vehicle_info_.mass_kg, vehicle_info_.mass_fl, vehicle_info_.mass_fr,
+    vehicle_info_.mass_rl, vehicle_info_.mass_rr, vehicle_info_.cf, vehicle_info_.cr);
 }
 
 }  // namespace vehicle_info_util

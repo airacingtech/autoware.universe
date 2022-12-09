@@ -20,7 +20,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <iostream>
 
+using namespace std;
 namespace motion
 {
 namespace motion_common
@@ -127,6 +129,16 @@ Real to_angle(Heading heading) noexcept
 Real to_angle(Orientation orientation) noexcept
 {
   return static_cast<Real>(tf2::getYaw(orientation));
+}
+
+double to_bank_angle(Orientation orientation) noexcept
+{
+  double roll = 0;
+  double pitch = 0;
+  double yaw = 0;
+  tf2::getEulerYPR(orientation,yaw,pitch,roll);
+  // cout << "Yaw is : " << roll <<endl;
+  return roll;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

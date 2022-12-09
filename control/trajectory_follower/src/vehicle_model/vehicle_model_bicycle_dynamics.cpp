@@ -15,7 +15,10 @@
 #include "trajectory_follower/vehicle_model/vehicle_model_bicycle_dynamics.hpp"
 
 #include <algorithm>
+#include <iostream>
 
+using namespace std;
+#define GRAVITY 9.81
 namespace autoware
 {
 namespace motion
@@ -29,6 +32,7 @@ DynamicsBicycleModel::DynamicsBicycleModel(
   const float64_t mass_rl, const float64_t mass_rr, const float64_t cf, const float64_t cr)
 : VehicleModelInterface(/* dim_x */ 4, /* dim_u */ 1, /* dim_y */ 2, wheelbase)
 {
+  // TODO : Add bank angle here
   const float64_t mass_front = mass_fl + mass_fr;
   const float64_t mass_rear = mass_rl + mass_rr;
 
@@ -38,6 +42,7 @@ DynamicsBicycleModel::DynamicsBicycleModel(
   m_iz = m_lf * m_lf * mass_front + m_lr * m_lr * mass_rear;
   m_cf = cf;
   m_cr = cr;
+  // m_bank_force = 0;
 }
 
 void DynamicsBicycleModel::calculateDiscreteMatrix(
@@ -71,18 +76,19 @@ void DynamicsBicycleModel::calculateDiscreteMatrix(
   b_d(2, 0) = 0.0;
   b_d(3, 0) = m_lf * m_cf / m_iz;
 
+  // cout << "Bank angle : " << m_bank_angle << " " << sin(-m_bank_angle) << endl;
   w_d = Eigen::MatrixXd::Zero(m_dim_x, 1);
   w_d(0, 0) = 0.0;
-  w_d(1, 0) = (m_lr * m_cr - m_lf * m_cf) / (m_mass * vel) - vel;
+  w_d(1, 0) = (m_lr * m_cr - m_lf * m_cf) / (m_mass * vel) - vel + GRAVITY*sin(-m_bank_angle)/(m_curvature * vel);
   w_d(2, 0) = 0.0;
-  w_d(3, 0) = -(m_lf * m_lf * m_cf + m_lr * m_lr * m_cr) / (m_iz * vel);
-
+  w_d(3, 0) = -(m_lf * m_lf * m_cf + m_lr * m_lr * m_cr) / (m_iz * vel);// + m_bank_force;
   b_d = (a_d_inverse * dt) * b_d;
   w_d = (a_d_inverse * dt * m_curvature * vel) * w_d;
-
+  // cout << "Curvature : " << m_curvature << endl;
   c_d = Eigen::MatrixXd::Zero(m_dim_y, m_dim_x);
   c_d(0, 0) = 1.0;
   c_d(1, 2) = 1.0;
+  // cout << "Critical checks : " << a_d(1,1) << " " << a_d(3,3) << " " << b_d(1,0) << " " << b_d(3,0) << endl;
 }
 
 void DynamicsBicycleModel::calculateReferenceInput(Eigen::MatrixXd & u_ref)

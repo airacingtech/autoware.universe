@@ -40,6 +40,7 @@ protected:
   const int64_t m_dim_y;  //!< @brief dimension of output y
   float64_t m_velocity;   //!< @brief vehicle velocity [m/s]
   float64_t m_curvature;  //!< @brief curvature on the linearized point on path
+  float64_t m_bank_angle;  //!< @brief curvature on the linearized point on path
   float64_t m_wheelbase;  //!< @brief wheelbase of the vehicle [m]
 
 public:
@@ -93,6 +94,12 @@ public:
    */
   void setCurvature(const float64_t curvature);
 
+  /**
+   * @brief set bank angle
+   * @param [in] bank_angle bank angle on the linearized point on path
+   */
+  void setBankAngle(const float64_t bank_angle);
+  
   /**
    * @brief calculate discrete model matrix of x_k+1 = a_d * xk + b_d * uk + w_d, yk = c_d * xk
    * @param [out] a_d coefficient matrix

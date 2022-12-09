@@ -23,7 +23,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
+using namespace std;
 #define DEG2RAD 3.1415926535 / 180.0
 #define RAD2DEG 180.0 / 3.1415926535
 
@@ -37,13 +39,15 @@ namespace trajectory_follower
 {
 using namespace std::literals::chrono_literals;
 using ::motion::motion_common::to_angle;
+using ::motion::motion_common::to_bank_angle;
 
 bool8_t MPC::calculateMPC(
   const autoware_auto_vehicle_msgs::msg::SteeringReport & current_steer,
   const float64_t current_velocity, const geometry_msgs::msg::Pose & current_pose,
   autoware_auto_control_msgs::msg::AckermannLateralCommand & ctrl_cmd,
   autoware_auto_planning_msgs::msg::Trajectory & predicted_traj,
-  autoware_auto_system_msgs::msg::Float32MultiArrayDiagnostic & diagnostic)
+  autoware_auto_system_msgs::msg::Float32MultiArrayDiagnostic & diagnostic,
+  nav_msgs::msg::Odometry::SharedPtr & m_current_odometry_ptr)
 {
   /* recalculate velocity from ego-velocity with dynamics */
   trajectory_follower::MPCTrajectory reference_trajectory =
@@ -54,7 +58,11 @@ bool8_t MPC::calculateMPC(
     RCLCPP_WARN_THROTTLE(m_logger, *m_clock, 1000 /*ms*/, "fail to get Data.");
     return false;
   }
-
+  double bank_angle = to_bank_angle(m_current_odometry_ptr->pose.pose.orientation);
+  // cout << "Setted bank angle : " << bank_angle << endl;
+  // bank_angle = static_cast<double>(to_angle(current_pose.orientation));
+  // cout << "Setted bank angle : " << bank_angle << endl;
+  m_vehicle_model_ptr->setBankAngle(bank_angle);
   /* define initial state for error dynamics */
   Eigen::VectorXd x0 = getInitialState(mpc_data);
 
@@ -263,6 +271,7 @@ bool8_t MPC::getData(
 {
   static constexpr auto duration = 5000 /*ms*/;
   size_t nearest_idx;
+  // cout << "Current pose : " << current_pose.position.x << " " << current_pose.position.y <<endl;
   if (!trajectory_follower::MPCUtils::calcNearestPoseInterp(
         traj, current_pose, &(data->nearest_pose), &(nearest_idx), &(data->nearest_time),
         ego_nearest_dist_threshold, ego_nearest_yaw_threshold, m_logger, *m_clock)) {
@@ -284,7 +293,13 @@ bool8_t MPC::getData(
     trajectory_follower::MPCUtils::calcLateralError(current_pose, data->nearest_pose);
   data->yaw_err = autoware::common::helper_functions::wrap_angle(
     to_angle(current_pose.orientation) - to_angle(data->nearest_pose.orientation));
-
+  // double bank_angle = to_bank_angle(data->nearest_pose.orientation);
+  // cout << "Setted bank angle 1 : " << bank_angle << endl;
+  // bank_angle = static_cast<double>(to_angle(current_pose.orientation));
+  // cout << "Setted bank angle 1 : " << bank_angle << endl;
+  // bank_angle = static_cast<double>(to_angle(data->nearest_pose.orientation));
+  // cout << "Setted bank angle 2 : " << bank_angle << endl;
+  // cout << "Setted bank angle 3 : " << data->yaw_err << endl;
   /* get predicted steer */
   if (!m_steer_prediction_prev) {
     m_steer_prediction_prev = std::make_shared<float64_t>(current_steer.steering_tire_angle);
@@ -432,13 +447,25 @@ Eigen::VectorXd MPC::getInitialState(const MPCData & data)
   } else if (m_vehicle_model_type == "kinematics_no_delay") {
     x0 << lat_err, yaw_err;
   } else if (m_vehicle_model_type == "dynamics") {
-    float64_t dlat = (lat_err - m_lateral_error_prev) / m_ctrl_period;
-    float64_t dyaw = (yaw_err - m_yaw_error_prev) / m_ctrl_period;
-    m_lateral_error_prev = lat_err;
-    m_yaw_error_prev = yaw_err;
-    dlat = m_lpf_lateral_error.filter(dlat);
-    dyaw = m_lpf_yaw_error.filter(dyaw);
+    float64_t dlat = (lat_err - m_lateral_error_prev) / (5*m_ctrl_period);
+    float64_t dyaw = (yaw_err - m_yaw_error_prev) / (5*m_ctrl_period);
+    
+    // cout << "State without filtered : " << lat_err << " " << dlat << " " << yaw_err << " " << dyaw << endl;
+    if (abs(dlat)>0.01 || abs(dyaw)>0.01) {
+      cout << "Filtered" <<endl;
+      // dlat = m_lpf_lateral_error.filter(dlat);
+      // dyaw = m_lpf_yaw_error.filter(dyaw);
+      m_lateral_error_prev = lat_err;
+      m_dlat_prev = dlat;
+      m_dyaw_prev = dyaw;
+      m_yaw_error_prev = yaw_err;
+    }
+    else {
+      dlat = m_dlat_prev;
+      dyaw = m_dyaw_prev;
+    }
     x0 << lat_err, dlat, yaw_err, dyaw;
+    // cout << "State : " << lat_err << " " << dlat << " " << yaw_err << " " << dyaw << endl;
     RCLCPP_DEBUG(m_logger, "(before lpf) dot_lat_err = %f, dot_yaw_err = %f", dlat, dyaw);
     RCLCPP_DEBUG(m_logger, "(after lpf) dot_lat_err = %f, dot_yaw_err = %f", dlat, dyaw);
   } else {

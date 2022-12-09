@@ -33,6 +33,7 @@ int64_t VehicleModelInterface::getDimY() { return m_dim_y; }
 float64_t VehicleModelInterface::getWheelbase() { return m_wheelbase; }
 void VehicleModelInterface::setVelocity(const float64_t velocity) { m_velocity = velocity; }
 void VehicleModelInterface::setCurvature(const float64_t curvature) { m_curvature = curvature; }
+void VehicleModelInterface::setBankAngle(const float64_t bank_angle) { m_bank_angle = bank_angle; }
 }  // namespace trajectory_follower
 }  // namespace control
 }  // namespace motion

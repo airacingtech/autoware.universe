@@ -105,6 +105,8 @@ MOTION_COMMON_PUBLIC Real to_angle(Heading heading) noexcept;
 /// Converts 3D quaternion to simple heading representation
 MOTION_COMMON_PUBLIC Real to_angle(Orientation orientation) noexcept;
 
+/// Converts 3D quaternion to simple bank angle representation
+MOTION_COMMON_PUBLIC double to_bank_angle(Orientation orientation) noexcept;
 /// Basic conversion
 template <typename RealT>
 Heading heading_from_angle(RealT angle) noexcept
