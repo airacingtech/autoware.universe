@@ -22,23 +22,27 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
+#include <message_filters/subscriber.h>
+#include <message_filters/cache.h>
+
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Polygon_2_algorithms.h>
 
 #include <vector>
 
+using namespace std::placeholders;
 namespace pointcloud_preprocessor
 {
 class PolygonRemoverComponent : public pointcloud_preprocessor::Filter
 {
+public:
+ using PolygonStamped = geometry_msgs::msg::PolygonStamped;
 protected:
   virtual void filter(
     const PointCloud2ConstPtr & input, const IndicesPtr & indices, PointCloud2 & output);
 
   void publishRemovedPolygon();
-  void on_polygon(geometry_msgs::msg::Polygon::SharedPtr msg);
-
-  void update_polygon(const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in);
+  void update_polygon(const geometry_msgs::msg::Polygon & polygon_in);
   static PolygonCgal polygon_geometry_to_cgal(
     const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in);
   PointCloud2 remove_updated_polygon_from_cloud(const PointCloud2ConstPtr & cloud_in);
@@ -49,15 +53,18 @@ private:
   rclcpp::Parameter param;
   std::vector<double> polygon_vertices_;
   geometry_msgs::msg::Polygon::SharedPtr polygon_;
-
+  
   bool polygon_is_initialized_ {false};
   bool will_visualize_;
   bool remove_outside_;
+  bool use_dynamic_polygon_ {false};
+  double polygon_sync_tolerance_sec_ = 0.0;
   PolygonCgal polygon_cgal_;
   visualization_msgs::msg::Marker marker_;
 
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_marker_ptr_;
-  rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr sub_poly_;
+  message_filters::Subscriber<PolygonStamped> sub_poly_;
+  std::unique_ptr<message_filters::Cache<PolygonStamped>> cache_poly_;
 
 public:
   PCL_MAKE_ALIGNED_OPERATOR_NEW

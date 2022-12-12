@@ -26,33 +26,37 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
   const auto working_mode = declare_parameter("working_mode", "PolygonSub");
   if (working_mode == "Static")
   {
-  this->declare_parameter<std::vector<double>>("polygon_vertices");
-  this->get_parameter("polygon_vertices", param);
-  polygon_vertices_ = param.as_double_array();
-  if (polygon_vertices_.size() % 2 != 0) {
-    throw std::length_error(
-      "polygon_vertices has odd number of elements. "
-      "It must have a list of x,y double pairs.");
-  }
+    use_dynamic_polygon_ = false;
+    this->declare_parameter<std::vector<double>>("polygon_vertices");
+    this->get_parameter("polygon_vertices", param);
+    polygon_vertices_ = param.as_double_array();
+    if (polygon_vertices_.size() % 2 != 0) {
+      throw std::length_error(
+        "polygon_vertices has odd number of elements. "
+        "It must have a list of x,y double pairs.");
+    }
 
-  auto make_point = [](float x, float y, float z) {
-    geometry_msgs::msg::Point32 point_32;
-    point_32.set__x(x);
-    point_32.set__y(y);
-    point_32.set__z(z);
-    return point_32;
-  };
-  polygon_ = std::make_shared<geometry_msgs::msg::Polygon>();
-  for (size_t i = 0UL; i < polygon_vertices_.size(); i += 2) {
-    auto p_x = static_cast<float>(polygon_vertices_.at(i));
-    auto p_y = static_cast<float>(polygon_vertices_.at(i + 1));
-    polygon_->points.emplace_back(make_point(p_x, p_y, 0.0F));
-  }
-  this->update_polygon(polygon_);
-  }
+    auto make_point = [](float x, float y, float z) {
+      geometry_msgs::msg::Point32 point_32;
+      point_32.set__x(x);
+      point_32.set__y(y);
+      point_32.set__z(z);
+      return point_32;
+    };
+    polygon_ = std::make_shared<geometry_msgs::msg::Polygon>();
+    for (size_t i = 0UL; i < polygon_vertices_.size(); i += 2) {
+      auto p_x = static_cast<float>(polygon_vertices_.at(i));
+      auto p_y = static_cast<float>(polygon_vertices_.at(i + 1));
+      polygon_->points.emplace_back(make_point(p_x, p_y, 0.0F));
+    }
+    this->update_polygon(*polygon_);
+    }
   else if (working_mode == "PolygonSub")
   {
-    sub_poly_ = create_subscription<geometry_msgs::msg::Polygon>("polygon_sub", rclcpp::SensorDataQoS(), [&](geometry_msgs::msg::Polygon::SharedPtr msg){on_polygon(msg);});
+    polygon_sync_tolerance_sec_ = declare_parameter<double>("polygon_sync_tolerance_sec");
+    use_dynamic_polygon_ = true;
+    sub_poly_.subscribe(this, "polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+    cache_poly_ = std::make_unique<message_filters::Cache<PolygonStamped>>(sub_poly_, 40);
   }
   else
   {
@@ -64,6 +68,18 @@ void PolygonRemoverComponent::filter(
   const PointCloud2ConstPtr & input, [[maybe_unused]] const IndicesPtr & indices,
   PointCloud2 & output)
 {
+  if (use_dynamic_polygon_ && cache_poly_)
+  {
+    auto closest_elm = cache_poly_->getElemBeforeTime(rclcpp::Time(input->header.stamp, RCL_SYSTEM_TIME));
+    if (!closest_elm || (rclcpp::Time(input->header.stamp) - rclcpp::Time(closest_elm->header.stamp)).seconds() > polygon_sync_tolerance_sec_)
+    {
+      RCLCPP_INFO_STREAM(get_logger(), "No polygon available within the sync tolerance of " << polygon_sync_tolerance_sec_ << " second, publishing incoming cloud.");
+      output = *input;
+      return;
+    }
+    update_polygon(closest_elm->polygon);
+  }
+
   if (!this->polygon_is_initialized_) {
     RCLCPP_INFO_STREAM(get_logger(), "Polygon is not initialized, publishing incoming cloud.");
     output = *input;
@@ -76,16 +92,11 @@ void PolygonRemoverComponent::filter(
   }
 }
 
-void PolygonRemoverComponent::on_polygon(geometry_msgs::msg::Polygon::SharedPtr msg)
-{
-  update_polygon(msg);
-}
-
 void PolygonRemoverComponent::update_polygon(
-  const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in)
+  const geometry_msgs::msg::Polygon & polygon_in)
 {
   polygon_cgal_.clear();
-  pointcloud_preprocessor::utils::to_cgal_polygon(*polygon_in, polygon_cgal_);
+  pointcloud_preprocessor::utils::to_cgal_polygon(polygon_in, polygon_cgal_);
   if (will_visualize_) {
     marker_.points.clear();
     marker_.ns = "";
