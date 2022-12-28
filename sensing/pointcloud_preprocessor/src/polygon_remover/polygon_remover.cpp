@@ -20,38 +20,66 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
 : Filter("PolygonRemover", options)
 {
   pub_marker_ptr_ = this->create_publisher<visualization_msgs::msg::Marker>("Removed_polygon", 10);
-
-  this->declare_parameter<std::vector<double>>("polygon_vertices");
-  this->get_parameter("polygon_vertices", param);
   this->declare_parameter<bool>("will_visualize");
   this->get_parameter("will_visualize", will_visualize_);
-  polygon_vertices_ = param.as_double_array();
-  if (polygon_vertices_.size() % 2 != 0) {
-    throw std::length_error(
-      "polygon_vertices has odd number of elements. "
-      "It must have a list of x,y double pairs.");
-  }
+  remove_outside_ = declare_parameter("remove_outside", false);
+  const auto working_mode = declare_parameter("working_mode", "PolygonSub");
+  if (working_mode == "Static")
+  {
+    use_dynamic_polygon_ = false;
+    this->declare_parameter<std::vector<double>>("polygon_vertices");
+    this->get_parameter("polygon_vertices", param);
+    polygon_vertices_ = param.as_double_array();
+    if (polygon_vertices_.size() % 2 != 0) {
+      throw std::length_error(
+        "polygon_vertices has odd number of elements. "
+        "It must have a list of x,y double pairs.");
+    }
 
-  auto make_point = [](float x, float y, float z) {
-    geometry_msgs::msg::Point32 point_32;
-    point_32.set__x(x);
-    point_32.set__y(y);
-    point_32.set__z(z);
-    return point_32;
-  };
-  polygon_ = std::make_shared<geometry_msgs::msg::Polygon>();
-  for (size_t i = 0UL; i < polygon_vertices_.size(); i += 2) {
-    auto p_x = static_cast<float>(polygon_vertices_.at(i));
-    auto p_y = static_cast<float>(polygon_vertices_.at(i + 1));
-    polygon_->points.emplace_back(make_point(p_x, p_y, 0.0F));
+    auto make_point = [](float x, float y, float z) {
+      geometry_msgs::msg::Point32 point_32;
+      point_32.set__x(x);
+      point_32.set__y(y);
+      point_32.set__z(z);
+      return point_32;
+    };
+    polygon_ = std::make_shared<geometry_msgs::msg::Polygon>();
+    for (size_t i = 0UL; i < polygon_vertices_.size(); i += 2) {
+      auto p_x = static_cast<float>(polygon_vertices_.at(i));
+      auto p_y = static_cast<float>(polygon_vertices_.at(i + 1));
+      polygon_->points.emplace_back(make_point(p_x, p_y, 0.0F));
+    }
+    this->update_polygon(*polygon_);
+    }
+  else if (working_mode == "PolygonSub")
+  {
+    polygon_sync_tolerance_sec_ = declare_parameter<double>("polygon_sync_tolerance_sec");
+    use_dynamic_polygon_ = true;
+    sub_poly_.subscribe(this, "polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+    cache_poly_ = std::make_unique<message_filters::Cache<PolygonStamped>>(sub_poly_, 40);
   }
-  this->update_polygon(polygon_);
+  else
+  {
+    throw std::logic_error("working_mode can only be either Static or PolygonSub.");
+  }
 }
 
 void PolygonRemoverComponent::filter(
   const PointCloud2ConstPtr & input, [[maybe_unused]] const IndicesPtr & indices,
   PointCloud2 & output)
 {
+  if (use_dynamic_polygon_ && cache_poly_)
+  {
+    auto closest_elm = cache_poly_->getElemBeforeTime(rclcpp::Time(input->header.stamp, RCL_SYSTEM_TIME));
+    if (!closest_elm || (rclcpp::Time(input->header.stamp) - rclcpp::Time(closest_elm->header.stamp)).seconds() > polygon_sync_tolerance_sec_)
+    {
+      RCLCPP_INFO_STREAM(get_logger(), "No polygon available within the sync tolerance of " << polygon_sync_tolerance_sec_ << " second, publishing incoming cloud.");
+      output = *input;
+      return;
+    }
+    update_polygon(closest_elm->polygon);
+  }
+
   if (!this->polygon_is_initialized_) {
     RCLCPP_INFO_STREAM(get_logger(), "Polygon is not initialized, publishing incoming cloud.");
     output = *input;
@@ -65,10 +93,12 @@ void PolygonRemoverComponent::filter(
 }
 
 void PolygonRemoverComponent::update_polygon(
-  const geometry_msgs::msg::Polygon::ConstSharedPtr & polygon_in)
+  const geometry_msgs::msg::Polygon & polygon_in)
 {
-  pointcloud_preprocessor::utils::to_cgal_polygon(*polygon_in, polygon_cgal_);
+  polygon_cgal_.clear();
+  pointcloud_preprocessor::utils::to_cgal_polygon(polygon_in, polygon_cgal_);
   if (will_visualize_) {
+    marker_.points.clear();
     marker_.ns = "";
     marker_.id = 0;
     marker_.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -130,7 +160,7 @@ sensor_msgs::msg::PointCloud2 PolygonRemoverComponent::remove_updated_polygon_fr
 
   PointCloud2 cloud_out;
   pointcloud_preprocessor::utils::remove_polygon_cgal_from_cloud(
-    *cloud_in, polygon_cgal_, cloud_out);
+    *cloud_in, polygon_cgal_, cloud_out, remove_outside_);
   return cloud_out;
 }
 }  // namespace pointcloud_preprocessor

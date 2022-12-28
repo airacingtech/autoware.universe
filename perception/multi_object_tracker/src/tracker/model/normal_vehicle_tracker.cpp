@@ -77,8 +77,8 @@ NormalVehicleTracker::NormalVehicleTracker(
   ekf_params_.p0_cov_yaw = std::pow(p0_stddev_yaw, 2.0);
   ekf_params_.p0_cov_vx = std::pow(p0_stddev_vx, 2.0);
   ekf_params_.p0_cov_slip = std::pow(p0_stddev_slip, 2.0);
-  max_vx_ = tier4_autoware_utils::kmph2mps(100);                       // [m/s]
-  max_slip_ = tier4_autoware_utils::deg2rad(30);                       // [rad/s]
+  max_vx_ = tier4_autoware_utils::kmph2mps(350);                       // [m/s]
+  max_slip_ = tier4_autoware_utils::deg2rad(30);                         // [rad/s]
   velocity_deviation_threshold_ = tier4_autoware_utils::kmph2mps(10);  // [m/s]
 
   // initialize X matrix
