@@ -53,7 +53,7 @@ pcl::PointCloud<pcl::PointXYZ> removePointsWithinPolygons(
 
   pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
   pointcloud_preprocessor::utils::remove_polygon_cgal_from_cloud(
-    *cloud_in, cgal_polys, filtered_cloud);
+    *cloud_in, cgal_polys, filtered_cloud, false);
 
   return filtered_cloud;
 }
