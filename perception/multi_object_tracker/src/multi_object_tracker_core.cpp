@@ -98,7 +98,7 @@ bool isSpecificAlivePattern(
   constexpr int min_measurement_count = 5;
   constexpr float max_elapsed_time = 10.0;
   constexpr float max_velocity = 1.0;
-  constexpr float max_distance = 100.0;
+  constexpr float max_distance = 200.0; 
 
   const std::uint8_t label = tracker->getHighestProbLabel();
 
@@ -140,10 +140,10 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
   tracked_objects_pub_ =
     create_publisher<autoware_auto_perception_msgs::msg::TrackedObjects>("output", rclcpp::QoS{1});
 
-  // Parameters
-  double publish_rate = declare_parameter<double>("publish_rate", 30.0);
-  world_frame_id_ = declare_parameter<std::string>("world_frame_id", "world");
-  bool enable_delay_compensation{declare_parameter("enable_delay_compensation", false)};
+  // Parameters (Set if not defined by default)
+  double publish_rate = declare_parameter<double>("publish_rate", 30.0); // Set if not defined
+  world_frame_id_ = declare_parameter<std::string>("world_frame_id", "world"); // Set if not defined
+  bool enable_delay_compensation{declare_parameter("enable_delay_compensation", false)}; // Set if not defined
 
   auto cti = std::make_shared<tf2_ros::CreateTimerROS>(
     this->get_node_base_interface(), this->get_node_timers_interface());
@@ -189,6 +189,12 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 void MultiObjectTracker::onMeasurement(
   const autoware_auto_perception_msgs::msg::DetectedObjects::ConstSharedPtr input_objects_msg)
 {
+  /* Logging DEBUG*/
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"),
+    "HELLO3"<< std::endl << " List size: " << list_tracker_.size() << std::endl);
+
+
+  /* get self pose */
   const auto self_transform = getTransformAnonymous(
     tf_buffer_, "base_link", world_frame_id_, input_objects_msg->header.stamp);
   if (!self_transform) {
@@ -201,6 +207,8 @@ void MultiObjectTracker::onMeasurement(
         *input_objects_msg, world_frame_id_, tf_buffer_, transformed_objects)) {
     return;
   }
+
+
   /* tracker prediction */
   rclcpp::Time measurement_time = input_objects_msg->header.stamp;
   for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr) {
@@ -218,10 +226,28 @@ void MultiObjectTracker::onMeasurement(
   for (auto tracker_itr = list_tracker_.begin(); tracker_itr != list_tracker_.end();
        ++tracker_itr, ++tracker_idx) {
     if (direct_assignment.find(tracker_idx) != direct_assignment.end()) {  // found
-      (*(tracker_itr))
-        ->updateWithMeasurement(
-          transformed_objects.objects.at(direct_assignment.find(tracker_idx)->second),
-          measurement_time);
+      // /* if our input is lidar and it's ahead of us by a threshold we just
+      // skip putting it into our ekf */
+      // const float THRESHOLD = 30.0;
+      // bool is_radar = transformed_objects.objects.at(direct_assignment.find(tracker_idx)->second).kinematics.has_twist_covariance;
+      // if (!is_radar) {
+      //   float x = input_objects_msg->objects[0].kinematics.pose_with_covariance.pose.position.x;
+      //   float y = input_objects_msg->objects[0].kinematics.pose_with_covariance.pose.position.y;
+      //   float distance = sqrt(x*x + y*y);
+      //   if ( x > 0.0) {
+      //     // (*(tracker_itr))->updateWithoutMeasurement();
+      //     continue;
+      //   } else {
+      //     (*(tracker_itr))->updateWithMeasurement(
+        (*(tracker_itr))
+          ->updateWithMeasurement(
+            transformed_objects.objects.at(direct_assignment.find(tracker_idx)->second),
+            measurement_time);
+      //   }
+      // }
+      // // else {
+      // //   input_objects_msg->objects[0].kinematics.has_twist_covariance = false;
+      // // }
     } else {  // not found
       (*(tracker_itr))->updateWithoutMeasurement();
     }
@@ -245,6 +271,13 @@ void MultiObjectTracker::onMeasurement(
   if (publish_timer_ == nullptr) {
     publish(measurement_time);
   }
+
+  // // Eric removed timer on EKF
+  // // if (publish_timer_ == nullptr) {
+  // RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"),
+  //   "HELLO2"<< std::endl << " Publish tracker " << std::endl);
+  // publish(measurement_time);
+  // // }
 }
 
 std::shared_ptr<Tracker> MultiObjectTracker::createNewTracker(
@@ -316,7 +349,7 @@ void MultiObjectTracker::sanitizeTracker(
 {
   constexpr float min_iou = 0.1;
   constexpr float min_iou_for_unknown_object = 0.001;
-  constexpr double distance_threshold = 5.0;
+  constexpr double distance_threshold = 0.5;
   /* delete collision tracker */
   for (auto itr1 = list_tracker.begin(); itr1 != list_tracker.end(); ++itr1) {
     autoware_auto_perception_msgs::msg::TrackedObject object1;
