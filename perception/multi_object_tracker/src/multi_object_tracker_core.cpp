@@ -44,11 +44,13 @@ boost::optional<geometry_msgs::msg::Transform> getTransformAnonymous(
   const tf2_ros::Buffer & tf_buffer, const std::string & source_frame_id,
   const std::string & target_frame_id, const rclcpp::Time & time)
 {
+  
   try {
     // check if the frames are ready
     std::string errstr;  // This argument prevents error msg from being displayed in the terminal.
     if (!tf_buffer.canTransform(
           target_frame_id, source_frame_id, tf2::TimePointZero, tf2::Duration::zero(), &errstr)) {
+      RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "FRAME NOT READY: " << errstr);
       return boost::none;
     }
 
@@ -126,9 +128,11 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 void MultiObjectTracker::onMeasurement(
   const autoware_auto_perception_msgs::msg::DetectedObjects::ConstSharedPtr input_objects_msg)
 {
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "RECEIVED MEASUREMENT");
   const auto self_transform = getTransformAnonymous(
     tf_buffer_, "base_link", world_frame_id_, input_objects_msg->header.stamp);
   if (!self_transform) {
+    RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "TRANSFORM FAILED");
     return;
   }
 
@@ -138,6 +142,8 @@ void MultiObjectTracker::onMeasurement(
         *input_objects_msg, world_frame_id_, tf_buffer_, transformed_objects)) {
     return;
   }
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "TRANSFORM SUCCESSFUL");
+
   /* tracker prediction */
   rclcpp::Time measurement_time = input_objects_msg->header.stamp;
   for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr) {
@@ -166,8 +172,10 @@ void MultiObjectTracker::onMeasurement(
 
   /* life cycle check */
   checkTrackerLifeCycle(list_tracker_, measurement_time, *self_transform);
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "REACH LIFECYCLE CHECK");
   /* sanitize trackers */
   sanitizeTracker(list_tracker_, measurement_time);
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "REACH Sanitize CHECK");
 
   /* new tracker */
   for (size_t i = 0; i < transformed_objects.objects.size(); ++i) {
@@ -252,7 +260,7 @@ void MultiObjectTracker::sanitizeTracker(
 {
   constexpr float min_iou = 0.1;
   constexpr float min_iou_for_unknown_object = 0.001;
-  constexpr double distance_threshold = 5.0;
+  constexpr double distance_threshold = 0.5;
   /* delete collision tracker */
   for (auto itr1 = list_tracker.begin(); itr1 != list_tracker.end(); ++itr1) {
     autoware_auto_perception_msgs::msg::TrackedObject object1;
@@ -329,6 +337,7 @@ void MultiObjectTracker::publish(const rclcpp::Time & time) const
   const auto subscriber_count = tracked_objects_pub_->get_subscription_count() +
                                 tracked_objects_pub_->get_intra_process_subscription_count();
   if (subscriber_count < 1) {
+    RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "NO SUBSCRIBER");
     return;
   }
   // Create output msg
@@ -337,6 +346,7 @@ void MultiObjectTracker::publish(const rclcpp::Time & time) const
   output_msg.header.stamp = time;
   for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr) {
     if (!shouldTrackerPublish(*itr)) {
+      RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "NO PUBLISH");
       continue;
     }
     autoware_auto_perception_msgs::msg::TrackedObject object;

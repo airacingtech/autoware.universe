@@ -49,20 +49,56 @@ NormalVehicleTracker::NormalVehicleTracker(
   object_ = object;
 
   // initialize params
+  // float q_stddev_x = 1.0;                                     // object coordinate [m/s]
+  // float q_stddev_y = 1.0;                                     // object coordinate [m/s]
+  // float q_stddev_yaw = tier4_autoware_utils::deg2rad(20);     // map coordinate[rad/s]
+  // float q_stddev_vx = tier4_autoware_utils::kmph2mps(30);     // object coordinate [m/(s*s)]
+  // float q_stddev_slip = tier4_autoware_utils::deg2rad(20);    // object coordinate [rad/(s*s)]
+  // float r_stddev_x = 1.0;                                     // object coordinate [m]
+  // float r_stddev_y = 1.0;                                     // object coordinate [m]
+  // float r_stddev_yaw = tier4_autoware_utils::deg2rad(30);     // map coordinate [rad]
+  // float r_stddev_vx = 15.0;                                    // object coordinate [m/s]
+  // float p0_stddev_x = 1.0;                                    // object coordinate [m/s]
+  // float p0_stddev_y = 1.0;                                    // object coordinate [m/s]
+  // float p0_stddev_yaw = tier4_autoware_utils::deg2rad(30);    // map coordinate [rad]
+  // float p0_stddev_vx = tier4_autoware_utils::kmph2mps(1000);  // object coordinate [m/s]
+  // float p0_stddev_slip = tier4_autoware_utils::deg2rad(10);   // object coordinate [rad/s]
+  
   float q_stddev_x = 1.0;                                     // object coordinate [m/s]
   float q_stddev_y = 1.0;                                     // object coordinate [m/s]
-  float q_stddev_yaw = tier4_autoware_utils::deg2rad(20);     // map coordinate[rad/s]
-  float q_stddev_vx = tier4_autoware_utils::kmph2mps(10);     // object coordinate [m/(s*s)]
+  float q_stddev_yaw = tier4_autoware_utils::deg2rad(5);     // map coordinate[rad/s]
+  float q_stddev_vx = tier4_autoware_utils::kmph2mps(15);     // object coordinate [m/(s*s)]
   float q_stddev_slip = tier4_autoware_utils::deg2rad(20);    // object coordinate [rad/(s*s)]
-  float r_stddev_x = 1.0;                                     // object coordinate [m]
-  float r_stddev_y = 0.3;                                     // object coordinate [m]
-  float r_stddev_yaw = tier4_autoware_utils::deg2rad(30);     // map coordinate [rad]
-  float r_stddev_vx = 1.0;                                    // object coordinate [m/s]
-  float p0_stddev_x = 1.0;                                    // object coordinate [m/s]
-  float p0_stddev_y = 0.3;                                    // object coordinate [m/s]
+  
+	float r_stddev_x = 1.5;                                     // object coordinate [m]
+  float r_stddev_y = 1.5;                                     // object coordinate [m]
+  float r_stddev_yaw = tier4_autoware_utils::deg2rad(20);     // map coordinate [rad]
+  float r_stddev_vx = 5.0;                                    // object coordinate [m/s]
+  
+	float p0_stddev_x = 1.0;                                    // object coordinate [m/s]
+  float p0_stddev_y = 1.0;                                    // object coordinate [m/s]
   float p0_stddev_yaw = tier4_autoware_utils::deg2rad(30);    // map coordinate [rad]
   float p0_stddev_vx = tier4_autoware_utils::kmph2mps(1000);  // object coordinate [m/s]
   float p0_stddev_slip = tier4_autoware_utils::deg2rad(10);   // object coordinate [rad/s]
+
+  // float q_stddev_x = 1.0;                                     // object coordinate [m/s]
+  // float q_stddev_y = 1.0;                                     // object coordinate [m/s]
+  // float q_stddev_yaw = tier4_autoware_utils::deg2rad(7);     // map coordinate[rad/s]
+  // float q_stddev_vx = tier4_autoware_utils::kmph2mps(15);     // object coordinate [m/(s*s)]
+  // float q_stddev_slip = tier4_autoware_utils::deg2rad(20);    // object coordinate [rad/(s*s)]
+  
+	// float r_stddev_x = 0.5;                                     // object coordinate [m]
+  // float r_stddev_y = 0.5;                                     // object coordinate [m]
+  // float r_stddev_yaw = tier4_autoware_utils::deg2rad(10);     // map coordinate [rad]
+  // float r_stddev_vx = 5.0;                                    // object coordinate [m/s]
+  
+	// float p0_stddev_x = 1.0;                                    // object coordinate [m/s]
+  // float p0_stddev_y = 1.0;                                    // object coordinate [m/s]
+  // float p0_stddev_yaw = tier4_autoware_utils::deg2rad(30);    // map coordinate [rad]
+  // float p0_stddev_vx = tier4_autoware_utils::kmph2mps(1000);  // object coordinate [m/s]
+  // float p0_stddev_slip = tier4_autoware_utils::deg2rad(10);   // object coordinate [rad/s]
+
+
   ekf_params_.q_cov_x = std::pow(q_stddev_x, 2.0);
   ekf_params_.q_cov_y = std::pow(q_stddev_y, 2.0);
   ekf_params_.q_cov_yaw = std::pow(q_stddev_yaw, 2.0);
