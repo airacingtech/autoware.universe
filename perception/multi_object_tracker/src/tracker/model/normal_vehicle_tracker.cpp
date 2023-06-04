@@ -78,7 +78,7 @@ NormalVehicleTracker::NormalVehicleTracker(
 	float p0_stddev_x = 1.0;                                    // object coordinate [m/s]
   float p0_stddev_y = 1.0;                                    // object coordinate [m/s]
   float p0_stddev_yaw = tier4_autoware_utils::deg2rad(30);    // map coordinate [rad]
-  float p0_stddev_vx = tier4_autoware_utils::kmph2mps(1000);  // object coordinate [m/s]
+  float p0_stddev_vx = tier4_autoware_utils::kmph2mps(100);  // object coordinate [m/s]
   float p0_stddev_slip = tier4_autoware_utils::deg2rad(10);   // object coordinate [rad/s]
 
   // float q_stddev_x = 1.0;                                     // object coordinate [m/s]
