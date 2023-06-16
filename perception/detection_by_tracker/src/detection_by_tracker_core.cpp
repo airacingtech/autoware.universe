@@ -84,6 +84,8 @@ void TrackerHandler::onTrackedObjects(
 
   // Add tracked objects to buffer
   objects_buffer_.push_front(*msg);
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("detection_by_tracker_node"), "Got tracked objects.");
+
 
   // Remove old data
   while (max_buffer_size < objects_buffer_.size()) {
@@ -195,6 +197,7 @@ void DetectionByTracker::setMaxSearchRange()
 void DetectionByTracker::onObjects(
   const tier4_perception_msgs::msg::DetectedObjectsWithFeature::ConstSharedPtr input_msg)
 {
+  RCLCPP_WARN_STREAM(rclcpp::get_logger("detection_by_tracker_node"), "Got detection objects.");
   autoware_auto_perception_msgs::msg::DetectedObjects detected_objects;
   detected_objects.header = input_msg->header;
 

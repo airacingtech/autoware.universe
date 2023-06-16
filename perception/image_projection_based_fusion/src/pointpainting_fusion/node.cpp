@@ -141,6 +141,15 @@ void PointPaintingFusionNode::preprocess(sensor_msgs::msg::PointCloud2 & painted
     static_cast<uint32_t>(painted_pointcloud_msg.data.size() / painted_pointcloud_msg.height);
 }
 
+/**
+ * @brief Fuse detected objects on a single image by projecting lidar points onto the image plane and painting the corresponding points in the output point cloud.
+ *
+ * @param input_pointcloud_msg The input point cloud message (unused in this function).
+ * @param image_id The ID of the image being processed.
+ * @param input_roi_msg Detected objects with associated features.
+ * @param camera_info Camera information for the image.
+ * @param painted_pointcloud_msg The output point cloud where painted points will be stored.
+ */
 void PointPaintingFusionNode::fuseOnSingleImage(
   __attribute__((unused)) const sensor_msgs::msg::PointCloud2 & input_pointcloud_msg,
   __attribute__((unused)) const std::size_t image_id,
@@ -158,7 +167,7 @@ void PointPaintingFusionNode::fuseOnSingleImage(
       tf_buffer_, /*target*/ camera_info.header.frame_id,
       /*source*/ painted_pointcloud_msg.header.frame_id, camera_info.header.stamp);
     if (!transform_stamped_optional) {
-      return;
+      return; // Return if the transform cannot be obtained
     }
     transform_stamped = transform_stamped_optional.value();
   }
@@ -179,6 +188,7 @@ void PointPaintingFusionNode::fuseOnSingleImage(
   sensor_msgs::PointCloud2Iterator<float> iter_ped(painted_pointcloud_msg, "PEDESTRIAN");
   sensor_msgs::PointCloud2Iterator<float> iter_bic(painted_pointcloud_msg, "BICYCLE");
 
+  // Iterate over the transformed point cloud
   for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(transformed_pointcloud, "x"),
        iter_y(transformed_pointcloud, "y"), iter_z(transformed_pointcloud, "z");
        iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z, ++iter_car, ++iter_ped, ++iter_bic) {
@@ -186,18 +196,19 @@ void PointPaintingFusionNode::fuseOnSingleImage(
     if (
       *iter_z <= 0.0 || (*iter_x / *iter_z) > tan_h_.at(image_id) ||
       (*iter_x / *iter_z) < -tan_h_.at(image_id)) {
-      continue;
+      continue; // Skip points outside the horizontal field of view
     }
-    // project
+
+    // project the 3D point to the image plane
     Eigen::Vector4d projected_point =
       camera_projection * Eigen::Vector4d(*iter_x, *iter_y, *iter_z, 1.0);
     Eigen::Vector2d normalized_projected_point = Eigen::Vector2d(
       projected_point.x() / projected_point.z(), projected_point.y() / projected_point.z());
 
-    // iterate 2d bbox
+    // iterate 2D bounding boxes
     for (const auto & feature_object : input_roi_msg.feature_objects) {
       sensor_msgs::msg::RegionOfInterest roi = feature_object.feature.roi;
-      // paint current point if it is inside bbox
+      // paint the current point if it falls inside the bounding box
       if (
         normalized_projected_point.x() >= roi.x_offset &&
         normalized_projected_point.x() <= roi.x_offset + roi.width &&
@@ -207,25 +218,25 @@ void PointPaintingFusionNode::fuseOnSingleImage(
           autoware_auto_perception_msgs::msg::ObjectClassification::UNKNOWN) {
         switch (feature_object.object.classification.front().label) {
           case autoware_auto_perception_msgs::msg::ObjectClassification::CAR:
-            *iter_car = 1.0;
+            *iter_car = 1.0; // Set the "CAR" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::TRUCK:
-            *iter_car = 1.0;
+            *iter_car = 1.0; // Set the "CAR" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::TRAILER:
-            *iter_car = 1.0;
+            *iter_car = 1.0; // Set the "CAR" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::BUS:
-            *iter_car = 1.0;
+            *iter_car = 1.0; // Set the "CAR" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::PEDESTRIAN:
-            *iter_ped = 1.0;
+            *iter_ped = 1.0; // Set the "PEDESTRIAN" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::BICYCLE:
-            *iter_bic = 1.0;
+            *iter_bic = 1.0; // Set the "BICYCLE" channel value to 1.0
             break;
           case autoware_auto_perception_msgs::msg::ObjectClassification::MOTORCYCLE:
-            *iter_bic = 1.0;
+            *iter_bic = 1.0; // Set the "BICYCLE" channel value to 1.0
             break;
         }
       }
@@ -234,10 +245,13 @@ void PointPaintingFusionNode::fuseOnSingleImage(
       }
     }
   }
+
+  // Store debug information for visualization purposes
   for (const auto & feature_object : input_roi_msg.feature_objects) {
     debug_image_rois.push_back(feature_object.feature.roi);
   }
 
+  // Publish debug image if debugger is available
   if (debugger_) {
     debugger_->image_rois_ = debug_image_rois;
     debugger_->obstacle_points_ = debug_image_points;

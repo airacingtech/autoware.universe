@@ -128,7 +128,7 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 void MultiObjectTracker::onMeasurement(
   const autoware_auto_perception_msgs::msg::DetectedObjects::ConstSharedPtr input_objects_msg)
 {
-  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "RECEIVED MEASUREMENT");
+  // RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "RECEIVED MEASUREMENT");
   const auto self_transform = getTransformAnonymous(
     tf_buffer_, "base_link", world_frame_id_, input_objects_msg->header.stamp);
   if (!self_transform) {
@@ -142,7 +142,7 @@ void MultiObjectTracker::onMeasurement(
         *input_objects_msg, world_frame_id_, tf_buffer_, transformed_objects)) {
     return;
   }
-  RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "TRANSFORM SUCCESSFUL");
+  // RCLCPP_WARN_STREAM(rclcpp::get_logger("multi_object_tracker"), "TRANSFORM SUCCESSFUL");
 
   /* tracker prediction */
   rclcpp::Time measurement_time = input_objects_msg->header.stamp;
