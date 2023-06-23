@@ -1,3 +1,3 @@
 /**:
   ros__parameters:
-    available_size: 1024 # MB
+    available_size: 512000 # MB (dynamic, updated by update_config.py in tools/system_monitor_misc. Initialized to high value to prevent warnings)
