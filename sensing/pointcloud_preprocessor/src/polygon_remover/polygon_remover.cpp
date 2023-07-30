@@ -70,7 +70,7 @@ void PolygonRemoverComponent::filter(
 {
   if (use_dynamic_polygon_ && cache_poly_)
   {
-    auto closest_elm = cache_poly_->getElemBeforeTime(rclcpp::Time(input->header.stamp, RCL_SYSTEM_TIME));
+    auto closest_elm = cache_poly_->getElemBeforeTime(rclcpp::Time(input->header.stamp, RCL_ROS_TIME));
     if (!closest_elm || (rclcpp::Time(input->header.stamp) - rclcpp::Time(closest_elm->header.stamp)).seconds() > polygon_sync_tolerance_sec_)
     {
       RCLCPP_INFO_STREAM(get_logger(), "No polygon available within the sync tolerance of " << polygon_sync_tolerance_sec_ << " second, publishing incoming cloud.");
