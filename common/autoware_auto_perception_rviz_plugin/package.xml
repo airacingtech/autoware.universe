@@ -21,6 +21,9 @@
   <depend>rviz_common</depend>
   <depend>rviz_default_plugins</depend>
   <depend>pluginlib</depend>
+  <depend>libfreeimage</depend>
+  <depend>freeimage</depend>
+  <depend>libfreeimage-dev</depend>
 
   <exec_depend>libqt5-widgets</exec_depend>
   <exec_depend>rviz2</exec_depend>
