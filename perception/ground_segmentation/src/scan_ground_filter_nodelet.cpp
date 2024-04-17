@@ -79,17 +79,24 @@ ScanGroundFilterComponent::ScanGroundFilterComponent(const rclcpp::NodeOptions &
   }
 }
 
+// This function converts the raw point cloud into a grid-based, radial ordered
+// list of points. It organizes the points based on their position 
+// to the vehicle relative to their distance from the LIDAR sensor.
 void ScanGroundFilterComponent::convertPointcloudGridScan(
   const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud,
   std::vector<PointCloudRefVector> & out_radial_ordered_points)
 {
+  // Resize the output vector to hold as many radial divisions as specified by the number of dividers.
   out_radial_ordered_points.resize(radial_dividers_num_);
-  PointRef current_point;
-  uint16_t back_steps_num = 1;
+  PointRef current_point; // Temporary storage for the current point being processed.
+  uint16_t back_steps_num = 1; // The number of steps to look back in the grid when calculating size.
 
+  // Calculate the change in angle that corresponds to a single grid size at the switch radius
   grid_size_rad_ =
     normalizeRadian(std::atan2(grid_mode_switch_radius_ + grid_size_m_, virtual_lidar_z_)) -
     normalizeRadian(std::atan2(grid_mode_switch_radius_, virtual_lidar_z_));
+  
+  // Process each point in the input point cloud.
   for (size_t i = 0; i < in_cloud->points.size(); ++i) {
     auto x{
       in_cloud->points[i].x - vehicle_info_.wheel_base_m / 2.0f -
@@ -100,14 +107,21 @@ void ScanGroundFilterComponent::convertPointcloudGridScan(
 
     // divide by vertical angle
     auto gamma{normalizeRadian(std::atan2(radius, virtual_lidar_z_), 0.0f)};
-    auto radial_div{
-      static_cast<size_t>(std::floor(normalizeDegree(theta / radial_divider_angle_rad_, 0.0)))};
+    
+    // Calculate the radial division index for the point based on its theta.
+    auto radial_div{static_cast<size_t>(std::floor(normalizeDegree(theta / radial_divider_angle_rad_, 0.0)))};
+    
+    // Initialize variables for grid identification and size calculation.
     uint16_t grid_id = 0;
     float curr_grid_size = 0.0f;
+
+    // Determine grid ID and size based on the distance of the range.
     if (radius <= grid_mode_switch_radius_) {
+      // For points within the switch radius
       grid_id = static_cast<uint16_t>(radius / grid_size_m_);
       curr_grid_size = grid_size_m_;
     } else {
+      // For points beyond the switch radius, calculate the grid ID and size based on the vertical angle.
       grid_id = grid_mode_switch_grid_id_ + (gamma - grid_mode_switch_angle_rad_) / grid_size_rad_;
       if (grid_id <= grid_mode_switch_grid_id_ + back_steps_num) {
         curr_grid_size = grid_size_m_;
@@ -116,20 +130,22 @@ void ScanGroundFilterComponent::convertPointcloudGridScan(
         curr_grid_size *= virtual_lidar_z_;
       }
     }
+
+    // Store the calculated grid-related data in the current_point structure.
     current_point.grid_id = grid_id;
     current_point.grid_size = curr_grid_size;
     current_point.radius = radius;
     current_point.theta = theta;
     current_point.radial_div = radial_div;
-    current_point.point_state = PointLabel::INIT;
-    current_point.orig_index = i;
-    current_point.orig_point = &in_cloud->points[i];
+    current_point.point_state = PointLabel::INIT; // Set the initial point state
+    current_point.orig_index = i; // Store the original index of the point
+    current_point.orig_point = &in_cloud->points[i]; // Store a pointer to the original point
 
-    // radial divisions
+    // Add the current point to the correct radial division in the output structure.
     out_radial_ordered_points[radial_div].emplace_back(current_point);
   }
 
-  // sort by distance
+  // Sort each radial division's points by their radius (distance from origin) to aid in further processing.
   for (size_t i = 0; i < radial_dividers_num_; ++i) {
     std::sort(
       out_radial_ordered_points[i].begin(), out_radial_ordered_points[i].end(),
@@ -283,32 +299,42 @@ void ScanGroundFilterComponent::recheckGroundCluster(
     }
   }
 }
+
+// Classifies points in a point cloud as ground or non-ground by processing each radial division.
+// Each point's classification is determined based on its position relative
 void ScanGroundFilterComponent::classifyPointCloudGridScan(
   std::vector<PointCloudRefVector> & in_radial_ordered_clouds,
   pcl::PointIndices & out_no_ground_indices)
 {
+  // Clear any existing indices of non-ground points.
   out_no_ground_indices.indices.clear();
-  for (size_t i = 0; i < in_radial_ordered_clouds.size(); ++i) {
-    PointsCentroid ground_cluster;
-    ground_cluster.initialize();
-    std::vector<GridCenter> gnd_grids;
-    GridCenter curr_gnd_grid;
 
-    // check empty ray
+  // Iterate over each radial division of the point cloud.
+  for (size_t i = 0; i < in_radial_ordered_clouds.size(); ++i) {
+    PointsCentroid ground_cluster; // Object to track the centroid of ground points within a radial division
+    ground_cluster.initialize(); // Initialize the ground cluster for the new radial division.
+    std::vector<GridCenter> gnd_grids; // Stores the centers of ground grids for ground level estimation.
+    GridCenter curr_gnd_grid; // Stores the current ground grid center being evaluated.
+
+    // check empty radial division is empty, skip to the next one.
     if (in_radial_ordered_clouds[i].size() == 0) {
       continue;
     }
 
-    // check the first point in ray
-    auto * p = &in_radial_ordered_clouds[i][0];
-    PointRef * prev_p;
-    prev_p = &in_radial_ordered_clouds[i][0];  // for checking the distance to prev point
+    // Start with the assumption that thte first point in the cloud cold be ground.
+    auto * p = &in_radial_ordered_clouds[i][0]; // Pointer to current point.
+    PointRef * prev_p; // Pointer to the previous point.
+    prev_p = &in_radial_ordered_clouds[i][0];  // Initialize prev_p with the first point.
 
+    // Flags to keep track of ground initialization status
     bool initialized_first_gnd_grid = false;
-    bool prev_list_init = false;
+    bool prev_list_init = false; // Initialize prev_p with the first point.
 
+    // Iterate over each radial division of the point cloud.
     for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); ++j) {
-      p = &in_radial_ordered_clouds[i][j];
+      p = &in_radial_ordered_clouds[i][j]; // Update the current point.
+
+      // Compute the global slope of the point from the x-y plane to determine ground
       float global_slope_p = std::atan(p->orig_point->z / p->radius);
       float non_ground_height_threshold_local = non_ground_height_threshold_;
       if (p->orig_point->x < low_priority_region_x_) {
@@ -537,31 +563,53 @@ void ScanGroundFilterComponent::extractObjectPoints(
   }
 }
 
+// The filter function is the main processing function for the ScanGroundFilterComponent
+// which takes in a point cloud and outputs a filtered point cloud without ground points.
 void ScanGroundFilterComponent::filter(
   const PointCloud2ConstPtr & input, [[maybe_unused]] const IndicesPtr & indices,
   PointCloud2 & output)
 {
+
+  // Lock the current scope based on a mutex to make the function thread-safe.
   std::scoped_lock lock(mutex_);
+
+  // Stop and save the time taken for processing.
   stop_watch_ptr_->toc("processing_time", true);
+
+  // Create a new point cloud structure to hold the sensor data.
   pcl::PointCloud<pcl::PointXYZ>::Ptr current_sensor_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+
   pcl::fromROSMsg(*input, *current_sensor_cloud_ptr);
 
+  // Prepare a vector to hold the ordered points after radial division.
   std::vector<PointCloudRefVector> radial_ordered_points;
 
+  // Prepare a structure to hold the indices of points classified as non-ground.
   pcl::PointIndices no_ground_indices;
+
+  // Allocate memory for a point cloud to hold the non-ground points.
   pcl::PointCloud<pcl::PointXYZ>::Ptr no_ground_cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+
+  // Reserve memory to improve performance.
   no_ground_cloud_ptr->points.reserve(current_sensor_cloud_ptr->points.size());
 
+  // Check if we are in elevation grid mode and process accordingly.
   if (elevation_grid_mode_) {
+
+    // Convert the point cloud into a format suitable for processing with grid scan.
     convertPointcloudGridScan(current_sensor_cloud_ptr, radial_ordered_points);
+
+    // Classify the points using the grid scan method.
     classifyPointCloudGridScan(radial_ordered_points, no_ground_indices);
   } else {
     convertPointcloud(current_sensor_cloud_ptr, radial_ordered_points);
     classifyPointCloud(radial_ordered_points, no_ground_indices);
   }
 
+  // Extract the non-ground points from the original point cloud.
   extractObjectPoints(current_sensor_cloud_ptr, no_ground_indices, no_ground_cloud_ptr);
 
+  // 
   auto no_ground_cloud_msg_ptr = std::make_shared<PointCloud2>();
   pcl::toROSMsg(*no_ground_cloud_ptr, *no_ground_cloud_msg_ptr);
 
