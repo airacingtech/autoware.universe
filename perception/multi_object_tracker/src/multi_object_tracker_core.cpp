@@ -74,8 +74,9 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
   detected_object_sub_ = create_subscription<autoware_auto_perception_msgs::msg::DetectedObjects>(
     "input", rclcpp::QoS{1},
     std::bind(&MultiObjectTracker::onMeasurement, this, std::placeholders::_1));
+  rclcpp::QoS qos_best_effort = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
   tracked_objects_pub_ =
-    create_publisher<autoware_auto_perception_msgs::msg::TrackedObjects>("output", rclcpp::QoS{1});
+    create_publisher<autoware_auto_perception_msgs::msg::TrackedObjects>("output", qos_best_effort);
 
   // Parameters
   double publish_rate = declare_parameter<double>("publish_rate", 30.0);
