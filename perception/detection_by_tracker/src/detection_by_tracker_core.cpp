@@ -150,15 +150,17 @@ DetectionByTracker::DetectionByTracker(const rclcpp::NodeOptions & node_options)
   tf_listener_(tf_buffer_)
 {
   // Create publishers and subscribers
+  rclcpp::QoS qos_best_effort = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
+  rclcpp::QoS qos_reliable = rclcpp::QoS(rclcpp::KeepLast(10)).reliable();
   trackers_sub_ = create_subscription<autoware_auto_perception_msgs::msg::TrackedObjects>(
-    "~/input/tracked_objects", rclcpp::QoS{1},
+    "~/input/tracked_objects", qos_best_effort,
     std::bind(&TrackerHandler::onTrackedObjects, &tracker_handler_, std::placeholders::_1));
   initial_objects_sub_ =
     create_subscription<tier4_perception_msgs::msg::DetectedObjectsWithFeature>(
-      "~/input/initial_objects", rclcpp::QoS{1},
+      "~/input/initial_objects", qos_reliable,
       std::bind(&DetectionByTracker::onObjects, this, std::placeholders::_1));
   objects_pub_ = create_publisher<autoware_auto_perception_msgs::msg::DetectedObjects>(
-    "~/output", rclcpp::QoS{1});
+    "~/output", qos_reliable);
 
   ignore_unknown_tracker_ = declare_parameter<bool>("ignore_unknown_tracker", true);
 
