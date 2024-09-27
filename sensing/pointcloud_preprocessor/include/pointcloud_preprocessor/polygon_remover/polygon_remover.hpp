@@ -62,7 +62,8 @@ private:
   PolygonCgal polygon_cgal_;
   visualization_msgs::msg::Marker marker_;
 
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_marker_ptr_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_marker_ptr_inside_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_marker_ptr_outside_;
   message_filters::Subscriber<PolygonStamped> sub_poly_;
   std::unique_ptr<message_filters::Cache<PolygonStamped>> cache_poly_;
 

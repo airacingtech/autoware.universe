@@ -19,10 +19,13 @@ namespace pointcloud_preprocessor
 PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & options)
 : Filter("PolygonRemover", options)
 {
-  pub_marker_ptr_ = this->create_publisher<visualization_msgs::msg::Marker>("Removed_polygon", 10);
+  pub_marker_ptr_inside_ = this->create_publisher<visualization_msgs::msg::Marker>("Removed_polygon_inside", 10);
+  pub_marker_ptr_outside_ = this->create_publisher<visualization_msgs::msg::Marker>("Removed_polygon_outside", 10);
   this->declare_parameter<bool>("will_visualize");
   this->get_parameter("will_visualize", will_visualize_);
   remove_outside_ = declare_parameter("remove_outside", false);
+  //this->declare_parameter<bool>("remove_outside");
+  this->get_parameter("remove_outside", remove_outside_); //Jiaming Debug
   const auto working_mode = declare_parameter("working_mode", "PolygonSub");
   if (working_mode == "Static")
   {
@@ -90,7 +93,11 @@ void PolygonRemoverComponent::filter(
 
   output = this->remove_updated_polygon_from_cloud(input);
   if (will_visualize_) {
-    pub_marker_ptr_->publish(marker_);
+    if (remove_outside_) {
+      pub_marker_ptr_outside_->publish(marker_);
+    } else {
+      pub_marker_ptr_inside_->publish(marker_);
+    }
   }
 }
 
@@ -106,7 +113,7 @@ void PolygonRemoverComponent::update_polygon(
     marker_.type = visualization_msgs::msg::Marker::LINE_LIST;
     marker_.action = visualization_msgs::msg::Marker::ADD;
     marker_.pose.orientation.w = 1.0;
-    marker_.scale.x = 0.02;
+    marker_.scale.x = 0.1;
     marker_.color.a = 1.0;
     marker_.color.r = 0.0;
     marker_.color.g = 1.0;
