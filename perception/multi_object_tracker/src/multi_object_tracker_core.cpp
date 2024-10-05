@@ -317,7 +317,8 @@ void MultiObjectTracker::sanitizeTracker(
 inline bool MultiObjectTracker::shouldTrackerPublish(
   const std::shared_ptr<const Tracker> tracker) const
 {
-  constexpr int measurement_count_threshold = 3;
+  // constexpr int measurement_count_threshold = 3;
+  constexpr int measurement_count_threshold = 5;
   if (tracker->getTotalMeasurementCount() < measurement_count_threshold) {
     return false;
   }
