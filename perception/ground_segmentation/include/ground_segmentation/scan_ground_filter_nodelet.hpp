@@ -175,6 +175,7 @@ private:
   bool use_recheck_ground_cluster_;  // to enable recheck ground cluster
   size_t radial_dividers_num_;
   VehicleInfo vehicle_info_;
+  double ground_blindspot_;
 
   /*!
    * Output transformed PointCloud from in_cloud_ptr->header.frame_id to in_target_frame

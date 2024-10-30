@@ -58,6 +58,8 @@ ScanGroundFilterComponent::ScanGroundFilterComponent(const rclcpp::NodeOptions &
     radial_dividers_num_ = std::ceil(2.0 * M_PI / radial_divider_angle_rad_);
     vehicle_info_ = VehicleInfoUtil(*this).getVehicleInfo();
 
+    ground_blindspot_ = declare_parameter("ground_blindspot", 0.0);  
+
     grid_mode_switch_grid_id_ =
       grid_mode_switch_radius_ / grid_size_m_;  // changing the mode of grid division
     virtual_lidar_z_ = vehicle_info_.vehicle_height_m;
@@ -315,6 +317,13 @@ void ScanGroundFilterComponent::classifyPointCloudGridScan(
         non_ground_height_threshold_local =
           non_ground_height_threshold_ * abs(p->orig_point->x / low_priority_region_x_);
       }
+      // Jiaming: if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
+      if (p->radius < ground_blindspot_){
+        p->point_state = PointLabel::NON_GROUND;
+        out_no_ground_indices.indices.push_back(p->orig_index);
+        prev_p = p;
+        continue;
+      }
       // classify first grid's point cloud
       if (
         !initialized_first_gnd_grid && global_slope_p >= global_slope_max_angle_rad_ &&
@@ -418,7 +427,6 @@ void ScanGroundFilterComponent::classifyPointCloud(
   pcl::PointIndices & out_no_ground_indices)
 {
   out_no_ground_indices.indices.clear();
-
   const pcl::PointXYZ init_ground_point(0, 0, 0);
   pcl::PointXYZ virtual_ground_point(0, 0, 0);
   calcVirtualGroundOrigin(virtual_ground_point);
@@ -439,7 +447,13 @@ void ScanGroundFilterComponent::classifyPointCloud(
       const float local_slope_max_angle = local_slope_max_angle_rad_;
       auto * p = &in_radial_ordered_clouds[i][j];
       auto * p_prev = &in_radial_ordered_clouds[i][j - 1];
-
+      // Jiaming: if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
+      if (p->radius < ground_blindspot_){
+        p->point_state = PointLabel::NON_GROUND;
+        out_no_ground_indices.indices.push_back(p->orig_index);
+        //prev_p = p;
+        continue;
+      }
       if (j == 0) {
         bool is_front_side = (p->orig_point->x > virtual_ground_point.x);
         if (use_virtual_ground_point_ && is_front_side) {
@@ -618,6 +632,9 @@ rcl_interfaces::msg::SetParametersResult ScanGroundFilterComponent::onParameter(
     RCLCPP_DEBUG_STREAM(
       get_logger(),
       "Setting use_recheck_ground_cluster to: " << std::boolalpha << use_recheck_ground_cluster_);
+  }
+  if (get_param(p, "ground_blindspot", ground_blindspot_)) {
+    RCLCPP_DEBUG(get_logger(), "Setting ground_blindspot to: %f.", ground_blindspot_);
   }
   rcl_interfaces::msg::SetParametersResult result;
   result.successful = true;
