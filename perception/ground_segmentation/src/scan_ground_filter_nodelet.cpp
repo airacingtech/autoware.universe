@@ -58,7 +58,9 @@ ScanGroundFilterComponent::ScanGroundFilterComponent(const rclcpp::NodeOptions &
     radial_dividers_num_ = std::ceil(2.0 * M_PI / radial_divider_angle_rad_);
     vehicle_info_ = VehicleInfoUtil(*this).getVehicleInfo();
 
-    ground_blindspot_ = declare_parameter("ground_blindspot", 0.0);  
+    ground_blindspot_ = declare_parameter("ground_blindspot", 0.0);
+    lidar_height_above_base_link_ = declare_parameter("lidar_height_above_base_link", 0.0); 
+    //wheel_radius_ = declare_parameter("wheel_radius", 0.0);   
 
     grid_mode_switch_grid_id_ =
       grid_mode_switch_radius_ / grid_size_m_;  // changing the mode of grid division
@@ -126,6 +128,7 @@ void ScanGroundFilterComponent::convertPointcloudGridScan(
     current_point.point_state = PointLabel::INIT;
     current_point.orig_index = i;
     current_point.orig_point = &in_cloud->points[i];
+    current_point.orig_point->z += lidar_height_above_base_link_ + wheel_radius_;
 
     // radial divisions
     out_radial_ordered_points[radial_div].emplace_back(current_point);
@@ -308,7 +311,9 @@ void ScanGroundFilterComponent::classifyPointCloudGridScan(
 
     bool initialized_first_gnd_grid = false;
     bool prev_list_init = false;
-
+    //Jiaming: only use corrected Z for global scope calculation and comparing to non_ground_hright_threshold
+    // and add the corrected z value to ground_cluster
+    // this change only in effect when using elevation_grid_mode
     for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); ++j) {
       p = &in_radial_ordered_clouds[i][j];
       float global_slope_p = std::atan(p->orig_point->z / p->radius);
@@ -635,6 +640,12 @@ rcl_interfaces::msg::SetParametersResult ScanGroundFilterComponent::onParameter(
   }
   if (get_param(p, "ground_blindspot", ground_blindspot_)) {
     RCLCPP_DEBUG(get_logger(), "Setting ground_blindspot to: %f.", ground_blindspot_);
+  }
+  if (get_param(p, "lidar_height_above_base_link", lidar_height_above_base_link_)) {
+    RCLCPP_DEBUG(get_logger(), "Setting lidar_height_above_base_link to: %f.", lidar_height_above_base_link_);
+  }
+  if (get_param(p, "wheel_radius", wheel_radius_)) {
+    RCLCPP_DEBUG(get_logger(), "Setting wheel_radius to: %f.", wheel_radius_);
   }
   rcl_interfaces::msg::SetParametersResult result;
   result.successful = true;

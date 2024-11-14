@@ -176,6 +176,8 @@ private:
   size_t radial_dividers_num_;
   VehicleInfo vehicle_info_;
   double ground_blindspot_;
+  double lidar_height_above_base_link_;
+  double wheel_radius_;
 
   /*!
    * Output transformed PointCloud from in_cloud_ptr->header.frame_id to in_target_frame
