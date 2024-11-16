@@ -70,6 +70,7 @@ private:
 
     size_t orig_index;  // index of this point in the source pointcloud
     pcl::PointXYZ * orig_point;
+    float corrected_Z; // Z coordinate if ground level is 0 (instead of lidar mounting level being zero)
   };
   using PointCloudRefVector = std::vector<PointRef>;
 
