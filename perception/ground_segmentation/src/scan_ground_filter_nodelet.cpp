@@ -312,7 +312,7 @@ void ScanGroundFilterComponent::classifyPointCloudGridScan(
 
     bool initialized_first_gnd_grid = false;
     bool prev_list_init = false;
-    //Jiaming: only use corrected Z for global scope calculation and comparing to non_ground_hright_threshold
+    // only use corrected Z for global scope calculation and comparing to non_ground_hright_threshold
     // and add the corrected z value to ground_cluster
     // this change only in effect when using elevation_grid_mode
     for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); ++j) {
@@ -323,7 +323,7 @@ void ScanGroundFilterComponent::classifyPointCloudGridScan(
         non_ground_height_threshold_local =
           non_ground_height_threshold_ * abs(p->orig_point->x / low_priority_region_x_);
       }
-      // Jiaming: if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
+      // if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
       if (p->radius < ground_blindspot_){
         p->point_state = PointLabel::NON_GROUND;
         out_no_ground_indices.indices.push_back(p->orig_index);
@@ -453,11 +453,10 @@ void ScanGroundFilterComponent::classifyPointCloud(
       const float local_slope_max_angle = local_slope_max_angle_rad_;
       auto * p = &in_radial_ordered_clouds[i][j];
       auto * p_prev = &in_radial_ordered_clouds[i][j - 1];
-      // Jiaming: if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
+      // if too close, lidar will not pickup the ground at all, so don't do ground filtering at all
       if (p->radius < ground_blindspot_){
         p->point_state = PointLabel::NON_GROUND;
         out_no_ground_indices.indices.push_back(p->orig_index);
-        //prev_p = p;
         continue;
       }
       if (j == 0) {
