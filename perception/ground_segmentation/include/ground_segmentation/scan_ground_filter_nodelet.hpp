@@ -239,13 +239,14 @@ private:
   /*!
    * Returns the resulting complementary PointCloud, one with the points kept
    * and the other removed as indicated in the indices
-   * @param in_cloud_ptr Input PointCloud to which the extraction will be performed
+   * @param in_cloud_ptr Input PointCloud2ConstPtr to which the extraction will be performed
    * @param in_indices Indices of the points to be both removed and kept
-   * @param out_object_cloud_ptr Resulting PointCloud with the indices kept
+   * @param out_object_cloud_ptr Resulting PointCloud2Ptr with the indices kept
    */
   void extractObjectPoints(
-    const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud_ptr, const pcl::PointIndices & in_indices,
-    pcl::PointCloud<pcl::PointXYZ>::Ptr out_object_cloud_ptr);
+    const PointCloud2ConstPtr &input,
+    const pcl::PointIndices &in_indices,
+    sensor_msgs::msg::PointCloud2::Ptr no_ground_cloud_msg_ptr);
 
   /** \brief Parameter service callback result : needed to be hold */
   OnSetParametersCallbackHandle::SharedPtr set_param_res_;

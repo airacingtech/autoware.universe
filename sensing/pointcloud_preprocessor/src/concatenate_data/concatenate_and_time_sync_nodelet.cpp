@@ -486,8 +486,8 @@ void PointCloudConcatenateDataSynchronizerComponent::cloud_callback(
     return;
   }
 
-  sensor_msgs::msg::PointCloud2::SharedPtr xyzi_input_ptr(new sensor_msgs::msg::PointCloud2());
-  convertToXYZICloud(input, xyzi_input_ptr);
+  // sensor_msgs::msg::PointCloud2::SharedPtr xyzi_input_ptr(new sensor_msgs::msg::PointCloud2());
+  // convertToXYZICloud(input, xyzi_input_ptr);
 
   const bool is_already_subscribed_this = (cloud_stdmap_[topic_name] != nullptr);
   const bool is_already_subscribed_tmp = std::any_of(
@@ -495,7 +495,7 @@ void PointCloudConcatenateDataSynchronizerComponent::cloud_callback(
     [](const auto & e) { return e.second != nullptr; });
 
   if (is_already_subscribed_this) {
-    cloud_stdmap_tmp_[topic_name] = xyzi_input_ptr;
+    cloud_stdmap_tmp_[topic_name] = input_ptr;
 
     if (!is_already_subscribed_tmp) {
       auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -508,7 +508,7 @@ void PointCloudConcatenateDataSynchronizerComponent::cloud_callback(
       timer_->reset();
     }
   } else {
-    cloud_stdmap_[topic_name] = xyzi_input_ptr;
+    cloud_stdmap_[topic_name] = input_ptr;
 
     const bool is_subscribed_all = std::all_of(
       std::begin(cloud_stdmap_), std::end(cloud_stdmap_),

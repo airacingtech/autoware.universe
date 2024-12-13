@@ -548,12 +548,34 @@ void ScanGroundFilterComponent::classifyPointCloud(
 }
 
 void ScanGroundFilterComponent::extractObjectPoints(
-  const pcl::PointCloud<pcl::PointXYZ>::Ptr in_cloud_ptr, const pcl::PointIndices & in_indices,
-  pcl::PointCloud<pcl::PointXYZ>::Ptr out_object_cloud_ptr)
+    const PointCloud2ConstPtr &input,
+    const pcl::PointIndices &in_indices,
+    sensor_msgs::msg::PointCloud2::Ptr no_ground_cloud_msg_ptr)
 {
-  for (const auto & i : in_indices.indices) {
-    out_object_cloud_ptr->points.emplace_back(in_cloud_ptr->points[i]);
-  }
+    // Copy header and metadata from input to output
+    no_ground_cloud_msg_ptr->header = input->header;
+    no_ground_cloud_msg_ptr->width = in_indices.indices.size();
+    no_ground_cloud_msg_ptr->height = 1; // Assume a flat point cloud
+    no_ground_cloud_msg_ptr->is_bigendian = input->is_bigendian;
+    no_ground_cloud_msg_ptr->is_dense = true; // Adjust later if necessary
+    no_ground_cloud_msg_ptr->point_step = input->point_step;
+    no_ground_cloud_msg_ptr->row_step = input->point_step * in_indices.indices.size();
+    no_ground_cloud_msg_ptr->fields = input->fields;
+    no_ground_cloud_msg_ptr->data.resize(no_ground_cloud_msg_ptr->row_step); // Allocate space for new data
+
+    // Pointer to the start of the output data
+    uint8_t *output_ptr = no_ground_cloud_msg_ptr->data.data();
+
+    for (const auto &index : in_indices.indices) {
+        // Calculate the byte offset for the index in the input
+        const uint8_t *input_ptr = &input->data[index * input->point_step];
+        
+        // Copy the entire point to the output using memcpy
+        std::memcpy(output_ptr, input_ptr, input->point_step);
+
+        // Advance the output pointer
+        output_ptr += input->point_step;
+    }
 }
 
 void ScanGroundFilterComponent::filter(
@@ -579,12 +601,9 @@ void ScanGroundFilterComponent::filter(
     classifyPointCloud(radial_ordered_points, no_ground_indices);
   }
 
-  extractObjectPoints(current_sensor_cloud_ptr, no_ground_indices, no_ground_cloud_ptr);
-
   auto no_ground_cloud_msg_ptr = std::make_shared<PointCloud2>();
-  pcl::toROSMsg(*no_ground_cloud_ptr, *no_ground_cloud_msg_ptr);
+  extractObjectPoints(input, no_ground_indices, no_ground_cloud_msg_ptr);
 
-  no_ground_cloud_msg_ptr->header = input->header;
   output = *no_ground_cloud_msg_ptr;
 
   if (debug_publisher_ptr_ && stop_watch_ptr_) {
