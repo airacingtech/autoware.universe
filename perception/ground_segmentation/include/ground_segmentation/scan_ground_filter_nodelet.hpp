@@ -70,6 +70,7 @@ private:
 
     size_t orig_index;  // index of this point in the source pointcloud
     pcl::PointXYZ * orig_point;
+    float corrected_Z; // Z coordinate if ground level is 0 (instead of lidar mounting level being zero)
   };
   using PointCloudRefVector = std::vector<PointRef>;
 
@@ -175,6 +176,9 @@ private:
   bool use_recheck_ground_cluster_;  // to enable recheck ground cluster
   size_t radial_dividers_num_;
   VehicleInfo vehicle_info_;
+  double ground_blindspot_;
+  double lidar_height_above_base_link_;
+  double wheel_radius_;
 
   /*!
    * Output transformed PointCloud from in_cloud_ptr->header.frame_id to in_target_frame
