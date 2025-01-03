@@ -62,7 +62,6 @@ ScanGroundFilterComponent::ScanGroundFilterComponent(const rclcpp::NodeOptions &
 
     ground_blindspot_ = declare_parameter("ground_blindspot", 0.0);
     lidar_height_above_base_link_ = declare_parameter("lidar_height_above_base_link", 0.0); 
-    //wheel_radius_ = declare_parameter("wheel_radius", 0.0);   
 
     grid_mode_switch_grid_id_ =
       grid_mode_switch_radius_ / grid_size_m_;  // changing the mode of grid division
@@ -314,7 +313,7 @@ void ScanGroundFilterComponent::classifyPointCloudGridScan(
 
     bool initialized_first_gnd_grid = false;
     bool prev_list_init = false;
-    // only use corrected Z for global scope calculation and comparing to non_ground_hright_threshold
+    // only use corrected Z for global scope calculation and comparing to non_ground_height_threshold
     // and add the corrected z value to ground_cluster
     // this change only in effect when using elevation_grid_mode
     for (size_t j = 0; j < in_radial_ordered_clouds[i].size(); ++j) {
