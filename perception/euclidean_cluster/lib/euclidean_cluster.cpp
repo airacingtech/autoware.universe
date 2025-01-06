@@ -38,6 +38,11 @@ bool EuclideanCluster::cluster(
   const pcl::PointCloud<pcl::PointXYZ>::ConstPtr & pointcloud,
   std::vector<pcl::PointCloud<pcl::PointXYZ>> & clusters)
 {
+  // don't bother if the pointcloud is empty
+  if (pointcloud->empty()) {
+    return false;
+  }
+  
   // convert 2d pointcloud
   pcl::PointCloud<pcl::PointXYZ>::ConstPtr pointcloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
   if (!use_height_) {
