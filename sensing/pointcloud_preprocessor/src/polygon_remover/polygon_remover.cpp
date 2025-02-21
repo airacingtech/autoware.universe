@@ -55,7 +55,11 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
   {
     polygon_sync_tolerance_sec_ = declare_parameter<double>("polygon_sync_tolerance_sec");
     use_dynamic_polygon_ = true;
-    sub_poly_.subscribe(this, "polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+    if (!in_pit){
+      sub_poly_.subscribe(this, "polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+    } else{
+      sub_poly_.subscribe(this, "pit_polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+    }
     cache_poly_ = std::make_unique<message_filters::Cache<PolygonStamped>>(sub_poly_, 40);
   }
   else
