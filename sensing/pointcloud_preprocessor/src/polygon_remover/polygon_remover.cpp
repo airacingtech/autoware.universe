@@ -55,10 +55,12 @@ PolygonRemoverComponent::PolygonRemoverComponent(const rclcpp::NodeOptions & opt
   {
     polygon_sync_tolerance_sec_ = declare_parameter<double>("polygon_sync_tolerance_sec");
     use_dynamic_polygon_ = true;
+    bool in_pit = true;
     if (!in_pit){
       sub_poly_.subscribe(this, "polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
     } else{
       sub_poly_.subscribe(this, "pit_polygon_sub", rclcpp::QoS{1}.get_rmw_qos_profile());
+      RCLCPP_WARN(get_logger(), "polygon remover subscribe to pit lane polygon");
     }
     cache_poly_ = std::make_unique<message_filters::Cache<PolygonStamped>>(sub_poly_, 40);
   }
