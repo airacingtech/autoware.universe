@@ -23,12 +23,17 @@ namespace euclidean_cluster
 EuclideanClusterNode::EuclideanClusterNode(const rclcpp::NodeOptions & options)
 : Node("euclidean_cluster_node", options)
 {
-  const bool use_height = this->declare_parameter("use_height", false);
-  const int min_cluster_size = this->declare_parameter("min_cluster_size", 3);
-  const int max_cluster_size = this->declare_parameter("max_cluster_size", 200);
-  const float tolerance = this->declare_parameter("tolerance", 1.0);
+  use_height_ = this->declare_parameter("use_height", false);
+  min_cluster_size_ = this->declare_parameter("min_cluster_size", 3);
+  max_cluster_size_ = this->declare_parameter("max_cluster_size", 200);
+  tolerance_ = this->declare_parameter("tolerance", 1.0);
+  // grab input from multi_car_tracker/param/tracker_preprocessor.param.yaml to overwrite default values above
+  this->get_parameter("use_height", use_height_); 
+  this->get_parameter("min_cluster_size", min_cluster_size_); 
+  this->get_parameter("max_cluster_size", max_cluster_size_); 
+  this->get_parameter("tolerance", tolerance_); 
   cluster_ =
-    std::make_shared<EuclideanCluster>(use_height, min_cluster_size, max_cluster_size, tolerance);
+    std::make_shared<EuclideanCluster>(use_height_, min_cluster_size_, max_cluster_size_, tolerance_);
 
   using std::placeholders::_1;
   pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
