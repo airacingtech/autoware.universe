@@ -34,6 +34,10 @@ public:
   explicit EuclideanClusterNode(const rclcpp::NodeOptions & options);
 
 private:
+  bool use_height_;
+  int min_cluster_size_;
+  int max_cluster_size_;
+  float tolerance_;
   void onPointCloud(sensor_msgs::msg::PointCloud2::ConstSharedPtr input_msg);
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
