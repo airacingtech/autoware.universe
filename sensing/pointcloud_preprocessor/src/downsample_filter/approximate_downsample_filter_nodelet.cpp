@@ -56,6 +56,7 @@
 #include <pcl/segmentation/segment_differences.h>
 
 #include <vector>
+#include <chrono>
 
 namespace pointcloud_preprocessor
 {
@@ -77,6 +78,8 @@ ApproximateDownsampleFilterComponent::ApproximateDownsampleFilterComponent(
 void ApproximateDownsampleFilterComponent::filter(
   const PointCloud2ConstPtr & input, const IndicesPtr & indices, PointCloud2 & output)
 {
+  auto start_time = std::chrono::high_resolution_clock::now();
+
   std::scoped_lock lock(mutex_);
   if (indices) {
     RCLCPP_WARN(get_logger(), "Indices are not supported and will be ignored");
@@ -92,6 +95,10 @@ void ApproximateDownsampleFilterComponent::filter(
 
   pcl::toROSMsg(*pcl_output, output);
   output.header = input->header;
+
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+  RCLCPP_INFO(get_logger(), "ApproximateDownsampleFilterComponent::filter execution time: %ld microseconds", duration.count());
 }
 
 rcl_interfaces::msg::SetParametersResult ApproximateDownsampleFilterComponent::paramCallback(
