@@ -160,126 +160,186 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
         distance_idx);
     }
 
-    // First pass: go over all points and insert them into the right leaf
-    for (size_t cp = 0; cp < input_->points.size(); ++cp) {
-      if (!input_->is_dense) {
-        // Check if the point is invalid
-        if (
-          !std::isfinite(input_->points[cp].x) || !std::isfinite(input_->points[cp].y) ||
-          !std::isfinite(input_->points[cp].z)) {
-          continue;
+    #pragma omp parallel
+    {
+      std::map<size_t, Leaf> local_leaves;
+
+      // First pass: go over all points and insert them into the right leaf
+      #pragma omp for nowait
+      for (size_t cp = 0; cp < input_->points.size(); ++cp) {
+        if (!input_->is_dense) {
+          // Check if the point is invalid
+          if (
+            !std::isfinite(input_->points[cp].x) || !std::isfinite(input_->points[cp].y) ||
+            !std::isfinite(input_->points[cp].z)) {
+            continue;
+          }
         }
-      }
 
-      // Get the distance value
-      const std::uint8_t * pt_data = reinterpret_cast<const std::uint8_t *>(&input_->points[cp]);
-      float distance_value = 0;
-      memcpy(&distance_value, pt_data + fields[distance_idx].offset, sizeof(float));
+        // Get the distance value
+        const std::uint8_t * pt_data = reinterpret_cast<const std::uint8_t *>(&input_->points[cp]);
+        float distance_value = 0;
+        memcpy(&distance_value, pt_data + fields[distance_idx].offset, sizeof(float));
 
-      if (filter_limit_negative_) {
-        // Use a threshold for cutting out points which inside the interval
-        if ((distance_value < filter_limit_max_) && (distance_value > filter_limit_min_)) {
-          continue;
+        if (filter_limit_negative_) {
+          // Use a threshold for cutting out points which inside the interval
+          if ((distance_value < filter_limit_max_) && (distance_value > filter_limit_min_)) {
+            continue;
+          }
+        } else {
+          // Use a threshold for cutting out points which are too close/far away
+          if ((distance_value > filter_limit_max_) || (distance_value < filter_limit_min_)) {
+            continue;
+          }
         }
-      } else {
-        // Use a threshold for cutting out points which are too close/far away
-        if ((distance_value > filter_limit_max_) || (distance_value < filter_limit_min_)) {
-          continue;
+
+        int ijk0 = static_cast<int>(
+          floor(input_->points[cp].x * inverse_leaf_size_[0]) - static_cast<float>(min_b_[0]));
+        int ijk1 = static_cast<int>(
+          floor(input_->points[cp].y * inverse_leaf_size_[1]) - static_cast<float>(min_b_[1]));
+        int ijk2 = static_cast<int>(
+          floor(input_->points[cp].z * inverse_leaf_size_[2]) - static_cast<float>(min_b_[2]));
+
+        // Compute the centroid leaf index
+        int idx = ijk0 * divb_mul_[0] + ijk1 * divb_mul_[1] + ijk2 * divb_mul_[2];
+
+        Leaf & leaf = local_leaves[idx];
+        if (leaf.nr_points == 0) {
+          leaf.centroid.resize(centroid_size);
+          leaf.centroid.setZero();
         }
-      }
 
-      int ijk0 = static_cast<int>(
-        floor(input_->points[cp].x * inverse_leaf_size_[0]) - static_cast<float>(min_b_[0]));
-      int ijk1 = static_cast<int>(
-        floor(input_->points[cp].y * inverse_leaf_size_[1]) - static_cast<float>(min_b_[1]));
-      int ijk2 = static_cast<int>(
-        floor(input_->points[cp].z * inverse_leaf_size_[2]) - static_cast<float>(min_b_[2]));
+        // Eigen::Vector3d pt3d (input_->points[cp].x, input_->points[cp].y, input_->points[cp].z);
 
-      // Compute the centroid leaf index
-      int idx = ijk0 * divb_mul_[0] + ijk1 * divb_mul_[1] + ijk2 * divb_mul_[2];
-
-      Leaf & leaf = leaves_[idx];
-      if (leaf.nr_points == 0) {
-        leaf.centroid.resize(centroid_size);
-        leaf.centroid.setZero();
-      }
-
-      // Eigen::Vector3d pt3d (input_->points[cp].x, input_->points[cp].y, input_->points[cp].z);
-
-      // Do we need to process all the fields?
-      if (!downsample_all_data_) {
-        Eigen::Vector4f pt(input_->points[cp].x, input_->points[cp].y, input_->points[cp].z, 0);
-        leaf.centroid.template head<4>() += pt;
-      } else {
-        // Copy all the fields
-        Eigen::VectorXf centroid = Eigen::VectorXf::Zero(centroid_size);
-        // ---[ RGB special case
-        if (rgba_index >= 0) {
-          // fill r/g/b data
-          int rgb;
-          memcpy(
-            &rgb, reinterpret_cast<const char *>(&input_->points[cp]) + rgba_index, sizeof(int));
-          centroid[centroid_size - 3] = static_cast<float>((rgb >> 16) & 0x0000ff);
-          centroid[centroid_size - 2] = static_cast<float>((rgb >> 8) & 0x0000ff);
-          centroid[centroid_size - 1] = static_cast<float>((rgb)&0x0000ff);
+        // Do we need to process all the fields?
+        if (!downsample_all_data_) {
+          Eigen::Vector4f pt(input_->points[cp].x, input_->points[cp].y, input_->points[cp].z, 0);
+          leaf.centroid.template head<4>() += pt;
+        } else {
+          // Copy all the fields
+          Eigen::VectorXf centroid = Eigen::VectorXf::Zero(centroid_size);
+          // ---[ RGB special case
+          if (rgba_index >= 0) {
+            // fill r/g/b data
+            int rgb;
+            memcpy(
+              &rgb, reinterpret_cast<const char *>(&input_->points[cp]) + rgba_index, sizeof(int));
+            centroid[centroid_size - 3] = static_cast<float>((rgb >> 16) & 0x0000ff);
+            centroid[centroid_size - 2] = static_cast<float>((rgb >> 8) & 0x0000ff);
+            centroid[centroid_size - 1] = static_cast<float>((rgb) & 0x0000ff);
+          }
+          pcl::for_each_type<FieldList>(
+            NdCopyPointEigenFunctor<PointT>(input_->points[cp], centroid));
+          leaf.centroid += centroid;
         }
-        pcl::for_each_type<FieldList>(
-          NdCopyPointEigenFunctor<PointT>(input_->points[cp], centroid));
-        leaf.centroid += centroid;
+        // leaf.points.push_back(input_->points[cp]);
+        ++leaf.nr_points;
       }
-      ++leaf.nr_points;
     }
+    // Merge local maps into global map
+    #pragma omp critical
+    {
+        for (const auto& local_leaf : local_leaves) {
+            size_t idx = local_leaf.first;
+            const Leaf& local_leaf_data = local_leaf.second;
+            
+            Leaf& global_leaf = leaves_[idx];
+            if (global_leaf.nr_points == 0) {
+                global_leaf = local_leaf_data;
+            } else {
+                // Merge centroids
+                global_leaf.centroid += local_leaf_data.centroid;
+                // Merge points
+                // global_leaf.points.insert(
+                //     global_leaf.points.end(),
+                //     local_leaf_data.points.begin(),
+                //     local_leaf_data.points.end()
+                // );
+                // Update point count
+                global_leaf.nr_points += local_leaf_data.nr_points;
+            }
+        }
+    }
+
   } else {  // No distance filtering, process all data
-    // First pass: go over all points and insert them into the right leaf
-    for (size_t cp = 0; cp < input_->points.size(); ++cp) {
-      if (!input_->is_dense) {
-        // Check if the point is invalid
-        if (
-          !std::isfinite(input_->points[cp].x) || !std::isfinite(input_->points[cp].y) ||
-          !std::isfinite(input_->points[cp].z)) {
-          continue;
+    #pragma omp parallel
+    {
+      std::map<size_t, Leaf> local_leaves;
+      // First pass: go over all points and insert them into the right leaf
+      for (size_t cp = 0; cp < input_->points.size(); ++cp) {
+        if (!input_->is_dense) {
+          // Check if the point is invalid
+          if (
+            !std::isfinite(input_->points[cp].x) || !std::isfinite(input_->points[cp].y) ||
+            !std::isfinite(input_->points[cp].z)) {
+            continue;
+          }
         }
-      }
 
-      int ijk0 = static_cast<int>(
-        floor(input_->points[cp].x * inverse_leaf_size_[0]) - static_cast<float>(min_b_[0]));
-      int ijk1 = static_cast<int>(
-        floor(input_->points[cp].y * inverse_leaf_size_[1]) - static_cast<float>(min_b_[1]));
-      int ijk2 = static_cast<int>(
-        floor(input_->points[cp].z * inverse_leaf_size_[2]) - static_cast<float>(min_b_[2]));
+        int ijk0 = static_cast<int>(
+          floor(input_->points[cp].x * inverse_leaf_size_[0]) - static_cast<float>(min_b_[0]));
+        int ijk1 = static_cast<int>(
+          floor(input_->points[cp].y * inverse_leaf_size_[1]) - static_cast<float>(min_b_[1]));
+        int ijk2 = static_cast<int>(
+          floor(input_->points[cp].z * inverse_leaf_size_[2]) - static_cast<float>(min_b_[2]));
 
-      // Compute the centroid leaf index
-      int idx = ijk0 * divb_mul_[0] + ijk1 * divb_mul_[1] + ijk2 * divb_mul_[2];
+        // Compute the centroid leaf index
+        int idx = ijk0 * divb_mul_[0] + ijk1 * divb_mul_[1] + ijk2 * divb_mul_[2];
 
-      Leaf & leaf = leaves_[idx];
-      if (leaf.nr_points == 0) {
-        leaf.centroid.resize(centroid_size);
-        leaf.centroid.setZero();
-      }
-
-      // Do we need to process all the fields?
-      if (!downsample_all_data_) {
-        Eigen::Vector4f pt(input_->points[cp].x, input_->points[cp].y, input_->points[cp].z, 0);
-        leaf.centroid.template head<4>() += pt;
-      } else {
-        // Copy all the fields
-        Eigen::VectorXf centroid = Eigen::VectorXf::Zero(centroid_size);
-        // ---[ RGB special case
-        if (rgba_index >= 0) {
-          // Fill r/g/b data, assuming that the order is BGRA
-          int rgb;
-          memcpy(
-            &rgb, reinterpret_cast<const char *>(&input_->points[cp]) + rgba_index, sizeof(int));
-          centroid[centroid_size - 3] = static_cast<float>((rgb >> 16) & 0x0000ff);
-          centroid[centroid_size - 2] = static_cast<float>((rgb >> 8) & 0x0000ff);
-          centroid[centroid_size - 1] = static_cast<float>((rgb)&0x0000ff);
+        Leaf & leaf = local_leaves[idx];
+        if (leaf.nr_points == 0) {
+          leaf.centroid.resize(centroid_size);
+          leaf.centroid.setZero();
         }
-        pcl::for_each_type<FieldList>(
-          NdCopyPointEigenFunctor<PointT>(input_->points[cp], centroid));
-        leaf.centroid += centroid;
+
+        // Do we need to process all the fields?
+        if (!downsample_all_data_) {
+          Eigen::Vector4f pt(input_->points[cp].x, input_->points[cp].y, input_->points[cp].z, 0);
+          leaf.centroid.template head<4>() += pt;
+        } else {
+          // Copy all the fields
+          Eigen::VectorXf centroid = Eigen::VectorXf::Zero(centroid_size);
+          // ---[ RGB special case
+          if (rgba_index >= 0) {
+            // Fill r/g/b data, assuming that the order is BGRA
+            int rgb;
+            memcpy(
+              &rgb, reinterpret_cast<const char *>(&input_->points[cp]) + rgba_index, sizeof(int));
+            centroid[centroid_size - 3] = static_cast<float>((rgb >> 16) & 0x0000ff);
+            centroid[centroid_size - 2] = static_cast<float>((rgb >> 8) & 0x0000ff);
+            centroid[centroid_size - 1] = static_cast<float>((rgb) & 0x0000ff);
+          }
+          pcl::for_each_type<FieldList>(
+            NdCopyPointEigenFunctor<PointT>(input_->points[cp], centroid));
+          leaf.centroid += centroid;
+        }
+        leaf.points.push_back(input_->points[cp]);
+        ++leaf.nr_points;
       }
-      leaf.points.push_back(input_->points[cp]);
-      ++leaf.nr_points;
+      // Merge local maps into global map
+      #pragma omp critical
+      {
+          for (const auto& local_leaf : local_leaves) {
+              size_t idx = local_leaf.first;
+              const Leaf& local_leaf_data = local_leaf.second;
+              
+              Leaf& global_leaf = leaves_[idx];
+              if (global_leaf.nr_points == 0) {
+                  global_leaf = local_leaf_data;
+              } else {
+                  // Merge centroids
+                  global_leaf.centroid += local_leaf_data.centroid;
+                  // Merge points
+                  global_leaf.points.insert(
+                      global_leaf.points.end(),
+                      local_leaf_data.points.begin(),
+                      local_leaf_data.points.end()
+                  );
+                  // Update point count
+                  global_leaf.nr_points += local_leaf_data.nr_points;
+              }
+          }
+      }
     }
   }
 
@@ -300,44 +360,62 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
 
   // Eigen values less than a threshold of max eigen value are inflated to a set fraction of the
   // max eigen value.
-  // double min_covar_eigenvalue;
+  // double min_cov_eigenvalue;
 
-  for (typename std::map<size_t, Leaf>::iterator it = leaves_.begin(); it != leaves_.end(); ++it) {
-    // Normalize the centroid
-    Leaf & leaf = it->second;
+  #pragma omp parallel
+  {
+    std::vector<PointT> local_output;
+    std::vector<int> local_indices;
 
-    // Normalize the centroid
-    leaf.centroid /= static_cast<float>(leaf.nr_points);
-    // Point sum used for single pass covariance calculation
-    // pt_sum = leaf.mean_;
-    // Normalize mean
-    // leaf.mean_ /= leaf.nr_points;
+    for (typename std::map<size_t, Leaf>::iterator it = leaves_.begin(); it != leaves_.end(); ++it) {
+      // Normalize the centroid
+      Leaf & leaf = it->second;
 
-    // If the voxel contains sufficient points, its covariance is calculated and is added to the
-    // voxel centroids and output clouds.
-    // Points with less than the minimum points will have a can not be accurately approximated
-    // using a normal distribution.
-    if (leaf.nr_points >= min_points_per_voxel_) {
-      if (save_leaf_layout_) {
-        leaf_layout_[it->first] = cp++;
+      // Normalize the centroid
+      leaf.centroid /= static_cast<float>(leaf.nr_points);
+      // Point sum used for single pass covariance calculation
+      // pt_sum = leaf.mean_;
+      // Normalize mean
+      // leaf.mean_ /= leaf.nr_points;
+
+      // If the voxel contains sufficient points, its covariance is calculated and is added to the
+      // voxel centroids and output clouds.
+      // Points with less than the minimum points will have a can not be accurately approximated
+      // using a normal distribution.
+      if (leaf.nr_points >= min_points_per_voxel_) {
+        if (save_leaf_layout_) {
+          leaf_layout_[it->first] = cp++;
+        }
+
+        const auto & centroid = leaf.centroid;
+        const auto squared_distances =
+          leaf.points | ranges::views::transform([&centroid](const auto & p) {
+            return (p.x - centroid[0]) * (p.x - centroid[0]) +
+                  (p.y - centroid[1]) * (p.y - centroid[1]) +
+                  (p.z - centroid[2]) * (p.z - centroid[2]);
+          });
+        const auto min_itr = ranges::min_element(squared_distances);
+        const auto min_idx = ranges::distance(squared_distances.begin(), min_itr);
+        local_output.push_back(leaf.points[min_idx]);
+
+        // Stores the voxel indices for fast access searching
+        if (searchable_) {
+          local_indices.push_back(static_cast<int>(it->first));
+        }
       }
+    }
 
-      output.push_back(PointT());
-
-      const auto & centroid = leaf.centroid;
-      const auto squared_distances =
-        leaf.points | ranges::views::transform([&centroid](const auto & p) {
-          return (p.x - centroid[0]) * (p.x - centroid[0]) +
-                 (p.y - centroid[1]) * (p.y - centroid[1]) +
-                 (p.z - centroid[2]) * (p.z - centroid[2]);
-        });
-      const auto min_itr = ranges::min_element(squared_distances);
-      const auto min_idx = ranges::distance(squared_distances.begin(), min_itr);
-      output.points.back() = leaf.points.at(min_idx);
-
-      // Stores the voxel indices for fast access searching
+    #pragma omp critical
+    {
+      output.points.insert(output.points.end(), 
+                          local_output.begin(), 
+                          local_output.end());
       if (searchable_) {
-        voxel_centroids_leaf_indices_.push_back(static_cast<int>(it->first));
+        voxel_centroids_leaf_indices_.insert(
+          voxel_centroids_leaf_indices_.end(),
+          local_indices.begin(),
+          local_indices.end()
+        );
       }
     }
   }
@@ -347,4 +425,4 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
 #define PCL_INSTANTIATE_VoxelGridNearestCentroid(T) \
   template class PCL_EXPORTS pcl::VoxelGridNearestCentroid<T>;
 
-#endif  // TIER4_PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
+#endif  // AUTOWARE__PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
