@@ -69,6 +69,24 @@ CudaPointcloudPreprocessorNode::CudaPointcloudPreprocessorNode(
   const auto crop_box_max_y_vector = declare_parameter<std::vector<double>>("crop_box.max_y");
   const auto crop_box_max_z_vector = declare_parameter<std::vector<double>>("crop_box.max_z");
 
+  // Add Voxel Grid Parameters
+  bool use_voxel_grid_filter = declare_parameter<bool>("voxel_grid_filter.enable", false); // New: to enable/disable easily
+  VoxelGridParams voxel_grid_params;
+  voxel_grid_params.leaf_size_x = declare_parameter<float>("voxel_grid_filter.leaf_size_x", 0.1f);
+  voxel_grid_params.leaf_size_y = declare_parameter<float>("voxel_grid_filter.leaf_size_y", 0.1f);
+  voxel_grid_params.leaf_size_z = declare_parameter<float>("voxel_grid_filter.leaf_size_z", 0.1f);
+  voxel_grid_params.min_points_per_voxel = declare_parameter<int>("voxel_grid_filter.min_points_per_voxel", 1);
+
+  // Bounds for the voxel grid - these are crucial.
+  // Option 1: Fixed bounds (most common for voxel grids in a known environment)
+  voxel_grid_params.min_x_bound = declare_parameter<double>("voxel_grid_filter.min_x_bound", -20.0);
+  voxel_grid_params.min_y_bound = declare_parameter<double>("voxel_grid_filter.min_y_bound", -20.0);
+  voxel_grid_params.min_z_bound = declare_parameter<double>("voxel_grid_filter.min_z_bound", -3.0);
+  voxel_grid_params.max_x_bound = declare_parameter<double>("voxel_grid_filter.max_x_bound", 20.0);
+  voxel_grid_params.max_y_bound = declare_parameter<double>("voxel_grid_filter.max_y_bound", 20.0);
+  voxel_grid_params.max_z_bound = declare_parameter<double>("voxel_grid_filter.max_z_bound", 3.0);
+  // Note: The CUDA kernel expects floats, so you might need to cast if you read as double.
+
   /* *INDENT-OFF* */
   if (
     crop_box_min_x_vector.size() != crop_box_min_y_vector.size() ||
@@ -136,6 +154,7 @@ CudaPointcloudPreprocessorNode::CudaPointcloudPreprocessorNode(
   cuda_pointcloud_preprocessor_->setRingOutlierFilterParameters(ring_outlier_filter_parameters);
   cuda_pointcloud_preprocessor_->setCropBoxParameters(crop_box_parameters);
   cuda_pointcloud_preprocessor_->setUndistortionType(undistortion_type);
+  cuda_pointcloud_preprocessor_->setVoxelGridParameters(voxel_grid_params);
 
   // initialize debug tool
   {

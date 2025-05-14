@@ -17,6 +17,7 @@
 
 #include "autoware/cuda_pointcloud_preprocessor/point_types.hpp"
 #include "autoware/cuda_pointcloud_preprocessor/types.hpp"
+#include "autoware/cuda_pointcloud_preprocessor/voxel_grid_kernels.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -47,6 +48,7 @@ public:
 
   void setCropBoxParameters(const std::vector<CropBoxParameters> & crop_box_parameters);
   void setRingOutlierFilterParameters(const RingOutlierFilterParameters & ring_outlier_parameters);
+  void setVoxelGridParameters(const VoxelGridParams & params);
   void setUndistortionType(const UndistortionType & undistortion_type);
 
   void preallocateOutput();
@@ -102,6 +104,8 @@ private:
   thrust::device_vector<TwistStruct3D> device_twist_3d_structs_{};
   thrust::device_vector<CropBoxParameters> host_crop_box_structs_{};
   thrust::device_vector<CropBoxParameters> device_crop_box_structs_{};
+
+  VoxelGridParams voxel_grid_parameters_;
 };
 
 }  // namespace autoware::cuda_pointcloud_preprocessor

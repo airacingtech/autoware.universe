@@ -19,6 +19,8 @@
 #include "autoware/cuda_pointcloud_preprocessor/point_types.hpp"
 #include "autoware/cuda_pointcloud_preprocessor/types.hpp"
 #include "autoware/cuda_pointcloud_preprocessor/undistort_kernels.hpp"
+#include "autoware/cuda_pointcloud_preprocessor/downsample_kernels.hpp"
+
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -196,6 +198,17 @@ void CudaPointcloudPreprocessor::preallocateOutput()
   output_pointcloud_ptr_ = std::make_unique<cuda_blackboard::CudaPointCloud2>();
   output_pointcloud_ptr_->data = cuda_blackboard::make_unique<std::uint8_t[]>(
     num_rings_ * max_points_per_ring_ * sizeof(OutputPointType));
+}
+
+// NEW FOR DOWNSAMPLING
+void CudaPointcloudPreprocessor::setVoxelGridParameters(const VoxelGridParams & params)
+{
+  voxel_grid_parameters_ = params;
+  // You might set enable_voxel_grid_filter_ based on some parameter logic too.
+  // For example, if leaf_size_x <= 0, disable it.
+  enable_voxel_grid_filter_ = (params.leaf_size_x > 0.0f &&
+                               params.leaf_size_y > 0.0f &&
+                               params.leaf_size_z > 0.0f);
 }
 
 void CudaPointcloudPreprocessor::organizePointcloud()
@@ -414,25 +427,74 @@ std::unique_ptr<cuda_blackboard::CudaPointCloud2> CudaPointcloudPreprocessor::pr
       ring_outlier_parameters_.object_length_threshold,
     ring_outlier_parameters_.num_points_threshold, threads_per_block_, blocks_per_grid, stream_);
 
+  // NEW FOR DOWNSAMPLING
+  InputPointType * device_points_to_filter = thrust::raw_pointer_cast(device_transformed_points_.data());
+  std::size_t current_num_points = num_organized_points_; // Number of points after organization and transformation
+
+  std::uint32_t * device_active_mask = thrust::raw_pointer_cast(device_ring_outlier_mask_.data()); // Reusing for general purpose filtering
+
+  cudaMemcpyAsync(device_active_mask,
+    thrust::raw_pointer_cast(device_crop_mask_.data()),
+    current_num_points * sizeof(std::uint32_t),
+    cudaMemcpyDeviceToDevice,
+    stream_);
+
+    thrust::device_vector<std::uint32_t> d_voxel_output_mask(current_num_points); // Temporary buffer
+    voxelGridNearestCentroidLaunch(
+      device_points_to_filter,
+      current_num_points,
+      voxel_grid_parameters_, // This MUST have min/max bounds set correctly
+      thrust::raw_pointer_cast(d_voxel_output_mask.data()),
+      threads_per_block_,
+      stream_);
+
+  // Now combine the existing active_mask (which has crop results) with d_voxel_output_mask
   combineMasksLaunch(
-    device_crop_mask, device_ring_outlier_mask, num_organized_points_, device_ring_outlier_mask,
-    threads_per_block_, blocks_per_grid, stream_);
+    device_active_mask, // Input: current active mask (e.g., from cropping)
+    thrust::raw_pointer_cast(d_voxel_output_mask.data()), // Input: mask from voxel grid
+    current_num_points,
+    device_active_mask, // Output: combined mask
+    blocks_per_grid, threads_per_block_, stream_);
 
+  // combineMasksLaunch(
+  //   device_crop_mask, device_ring_outlier_mask, num_organized_points_, device_ring_outlier_mask,
+  //   threads_per_block_, blocks_per_grid, stream_);
+
+  // Inclusive scan to get indices for compaction
   thrust::inclusive_scan(
-    thrust::device, device_ring_outlier_mask, device_ring_outlier_mask + num_organized_points_,
-    device_indices);
+    thrust::device, device_active_mask, device_active_mask + current_num_points,
+    device_indices_.data()); // device_indices_ is a class member
 
-  std::uint32_t num_output_points;
-  cudaMemcpyAsync(
-    &num_output_points, device_indices + num_organized_points_ - 1, sizeof(std::uint32_t),
-    cudaMemcpyDeviceToHost, stream_);
-  cudaStreamSynchronize(stream_);
+  // thrust::inclusive_scan(
+  //   thrust::device, device_ring_outlier_mask, device_ring_outlier_mask + num_organized_points_,
+  //   device_indices);
+
+  std::uint32_t num_output_points = 0;
+  if (current_num_points > 0) {
+     cudaMemcpyAsync( // Get the total count of points to keep
+      &num_output_points, device_indices_.data() + current_num_points - 1, sizeof(std::uint32_t),
+      cudaMemcpyDeviceToHost, stream_);
+    cudaStreamSynchronize(stream_); // Synchronize to get num_output_points
+  }
+
+  // std::uint32_t num_output_points;
+  // cudaMemcpyAsync(
+  //   &num_output_points, device_indices + num_organized_points_ - 1, sizeof(std::uint32_t),
+  //   cudaMemcpyDeviceToHost, stream_);
+  // cudaStreamSynchronize(stream_);
 
   if (num_output_points > 0) {
+    // Check if output_pointcloud_ptr_->data needs reallocation
+    if (output_pointcloud_ptr_->data == nullptr || (num_output_points * sizeof(OutputPointType)) > output_pointcloud_ptr_->data.size()) {
+      output_pointcloud_ptr_->data = cuda_blackboard::make_unique<std::uint8_t[]>(num_output_points * sizeof(OutputPointType));
+    }
     extractPointsLaunch(
-      device_transformed_points, device_ring_outlier_mask, device_indices, num_organized_points_,
-      reinterpret_cast<OutputPointType *>(output_pointcloud_ptr_->data.get()), threads_per_block_,
-      blocks_per_grid, stream_);
+      device_points_to_filter, // Source points
+      device_active_mask,      // The final mask
+      device_indices_.data(),  // Indices from inclusive_scan
+      current_num_points,
+      reinterpret_cast<OutputPointType *>(output_pointcloud_ptr_->data.get()),
+      threads_per_block_, blocks_per_grid, stream_);  
   }
 
   cudaStreamSynchronize(stream_);
