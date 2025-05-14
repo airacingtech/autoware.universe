@@ -48,10 +48,10 @@
  *
  */
 
-#ifndef TIER4_PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
-#define TIER4_PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
+#ifndef AUTOWARE__PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
+#define AUTOWARE__PCL_EXTENSIONS__VOXEL_GRID_NEAREST_CENTROID_IMPL_HPP_
 
-#include "tier4_pcl_extensions/voxel_grid_nearest_centroid.hpp"
+#include "autoware/pcl_extensions/voxel_grid_nearest_centroid.hpp"
 
 #include <Eigen/Cholesky>
 #include <Eigen/Dense>
@@ -235,30 +235,30 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
         // leaf.points.push_back(input_->points[cp]);
         ++leaf.nr_points;
       }
-    }
-    // Merge local maps into global map
-    #pragma omp critical
-    {
+      // Merge local maps into global map
+      #pragma omp critical
+      {
         for (const auto& local_leaf : local_leaves) {
-            size_t idx = local_leaf.first;
-            const Leaf& local_leaf_data = local_leaf.second;
-            
-            Leaf& global_leaf = leaves_[idx];
-            if (global_leaf.nr_points == 0) {
-                global_leaf = local_leaf_data;
-            } else {
-                // Merge centroids
-                global_leaf.centroid += local_leaf_data.centroid;
-                // Merge points
-                // global_leaf.points.insert(
-                //     global_leaf.points.end(),
-                //     local_leaf_data.points.begin(),
-                //     local_leaf_data.points.end()
-                // );
-                // Update point count
-                global_leaf.nr_points += local_leaf_data.nr_points;
-            }
+          size_t idx = local_leaf.first;
+          const Leaf& local_leaf_data = local_leaf.second;
+          
+          Leaf& global_leaf = leaves_[idx];
+          if (global_leaf.nr_points == 0) {
+            global_leaf = local_leaf_data;
+          } else {
+            // Merge centroids
+            global_leaf.centroid += local_leaf_data.centroid;
+            // Merge points
+            // global_leaf.points.insert(
+            //     global_leaf.points.end(),
+            //     local_leaf_data.points.begin(),
+            //     local_leaf_data.points.end()
+            // );
+            // Update point count
+            global_leaf.nr_points += local_leaf_data.nr_points;
+          }
         }
+      }
     }
 
   } else {  // No distance filtering, process all data
@@ -319,26 +319,26 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
       // Merge local maps into global map
       #pragma omp critical
       {
-          for (const auto& local_leaf : local_leaves) {
-              size_t idx = local_leaf.first;
-              const Leaf& local_leaf_data = local_leaf.second;
-              
-              Leaf& global_leaf = leaves_[idx];
-              if (global_leaf.nr_points == 0) {
-                  global_leaf = local_leaf_data;
-              } else {
-                  // Merge centroids
-                  global_leaf.centroid += local_leaf_data.centroid;
-                  // Merge points
-                  global_leaf.points.insert(
-                      global_leaf.points.end(),
-                      local_leaf_data.points.begin(),
-                      local_leaf_data.points.end()
-                  );
-                  // Update point count
-                  global_leaf.nr_points += local_leaf_data.nr_points;
-              }
+        for (const auto& local_leaf : local_leaves) {
+          size_t idx = local_leaf.first;
+          const Leaf& local_leaf_data = local_leaf.second;
+          
+          Leaf& global_leaf = leaves_[idx];
+          if (global_leaf.nr_points == 0) {
+            global_leaf = local_leaf_data;
+          } else {
+            // Merge centroids
+            global_leaf.centroid += local_leaf_data.centroid;
+            // Merge points
+            global_leaf.points.insert(
+                global_leaf.points.end(),
+                local_leaf_data.points.begin(),
+                local_leaf_data.points.end()
+            );
+            // Update point count
+            global_leaf.nr_points += local_leaf_data.nr_points;
           }
+        }
       }
     }
   }
