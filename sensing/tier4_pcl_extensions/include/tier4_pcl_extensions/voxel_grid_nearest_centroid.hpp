@@ -171,7 +171,7 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
       std::map<size_t, Leaf> local_leaves;
 
       // First pass: go over all points and insert them into the right leaf
-    //   #pragma omp for nowait 
+      // #pragma omp for nowait 
       for (size_t cp = 0; cp < input_->points.size(); ++cp) {
         if (!input_->is_dense) {
           // Check if the point is invalid
