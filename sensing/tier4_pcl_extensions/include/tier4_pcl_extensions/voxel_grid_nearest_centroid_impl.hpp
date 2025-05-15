@@ -374,7 +374,7 @@ void pcl::VoxelGridNearestCentroid<PointT>::applyFilter(PointCloud & output)
     // max eigen value.
     // double min_cov_eigenvalue;
 
-    #pragma omp parallel num_threads(16)
+    // #pragma omp parallel num_threads(16)
     {
       std::vector<PointT> local_output;
       std::vector<int> local_indices;
