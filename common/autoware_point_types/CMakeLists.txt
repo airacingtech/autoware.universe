@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(autoware_point_types)
 
 find_package(autoware_cmake REQUIRED)
+find_package(PCL REQUIRED)
 autoware_package()
 
 include_directories(
