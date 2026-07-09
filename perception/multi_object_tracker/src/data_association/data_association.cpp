@@ -186,8 +186,12 @@ Eigen::MatrixXd DataAssociation::calcScoreMatrix(
           const double area = tier4_autoware_utils::getArea(measurement_object.shape);
           if (area < min_area || max_area < area) passed_gate = false;
         }
-        // angle gate
-        if (passed_gate) {
+        // angle gate: skipped when the measurement carries no orientation — such
+        // detections hold an identity quaternion, so a yaw comparison is meaningless
+        const bool measurement_has_orientation =
+          measurement_object.kinematics.orientation_availability !=
+          autoware_auto_perception_msgs::msg::DetectedObjectKinematics::UNAVAILABLE;
+        if (passed_gate && measurement_has_orientation) {
           const double max_rad = max_rad_matrix_(tracker_label, measurement_label);
           const double angle = getFormedYawAngle(
             measurement_object.kinematics.pose_with_covariance.pose.orientation,
