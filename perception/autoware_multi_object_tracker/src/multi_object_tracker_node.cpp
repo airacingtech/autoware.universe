@@ -278,7 +278,16 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 
     sub_objects_array_.at(index) =
       create_subscription<autoware_perception_msgs::msg::DetectedObjects>(
-        input_channel_topic, rclcpp::QoS{1},
+        // ONE-VARIABLE EXPERIMENT (not a proposed change): the detection
+        // subscription ships at KEEP_LAST depth 1 while the upstream fusion
+        // publisher uses depth 10. The measured first loss is fusion -> this
+        // callback, 59-69 of 424 messages in 5 of 5 runs, with every stage after
+        // the callback conserving exactly. Raising ONLY this depth tests whether
+        // the loss is subscriber-queue overwrite.
+        input_channel_topic,
+        rclcpp::QoS{std::getenv("TRACKER_SUB_DEPTH")
+                    ? static_cast<size_t>(std::atoi(std::getenv("TRACKER_SUB_DEPTH")))
+                    : static_cast<size_t>(1)},
         [this,
          index](AUTOWARE_MESSAGE_CONST_SHARED_PTR(autoware_perception_msgs::msg::DetectedObjects)
                   msg) { this->onMeasurement(index, std::move(msg)); });
