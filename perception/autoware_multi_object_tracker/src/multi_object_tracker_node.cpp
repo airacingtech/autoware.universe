@@ -16,6 +16,13 @@
 
 #include "multi_object_tracker_node.hpp"
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
+
 #include "autoware/multi_object_tracker/types.hpp"
 #include "autoware/multi_object_tracker/uncertainty/uncertainty_processor.hpp"
 
@@ -323,6 +330,57 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
   }
 }
 
+namespace
+{
+// CONTINUITY TRACE. Diagnostics only: nothing here changes association,
+// covariance, lifetime, batching or publish policy. Enabled only when
+// TRACKER_TRACE points at a writable path, so an unset environment leaves the
+// node byte-for-byte in its shipped behaviour.
+//
+// It exists to locate the FIRST loss or divergence along
+//   fusion visible -> tracker callback -> queue/process batch -> publish call
+//   -> DDS observers -> bag
+// which previous work could only bracket from the outside.
+class ContinuityTrace
+{
+public:
+  static ContinuityTrace & instance()
+  {
+    static ContinuityTrace t;
+    return t;
+  }
+  bool enabled() const {return fh_ != nullptr;}
+  void write(const std::string & line)
+  {
+    if (!fh_) {return;}
+    std::lock_guard<std::mutex> lk(m_);
+    std::fputs(line.c_str(), fh_);
+    std::fputc('\n', fh_);
+    std::fflush(fh_);      // crash-safe: the trace must survive a kill
+  }
+
+private:
+  ContinuityTrace()
+  {
+    const char * path = std::getenv("TRACKER_TRACE");
+    if (path && *path) {fh_ = std::fopen(path, "a");}
+  }
+  ~ContinuityTrace() {if (fh_) {std::fclose(fh_);}}
+  std::FILE * fh_{nullptr};
+  std::mutex m_;
+};
+
+std::string trace_line(
+  const char * stage, double now_s, double stamp_s, long long count, long long size)
+{
+  std::ostringstream o;
+  o.setf(std::ios::fixed);
+  o << "{\"stage\":\"" << stage << "\",\"now\":" << std::setprecision(9) << now_s
+    << ",\"stamp\":" << stamp_s << ",\"count\":" << count << ",\"size\":" << size << "}";
+  return o.str();
+}
+}  // namespace
+
 void MultiObjectTracker::onMeasurement(
   const size_t channel_index,
   AUTOWARE_MESSAGE_CONST_SHARED_PTR(autoware_perception_msgs::msg::DetectedObjects) msg)
@@ -331,8 +389,27 @@ void MultiObjectTracker::onMeasurement(
   if (time_keeper_) st_ptr = std::make_unique<ScopedTimeTrack>(__func__, *time_keeper_);
 
   const rclcpp::Time current_time = this->now();
+  // (1) CALLBACK RECEIPT: the measurement arrived here, with its own stamp and the
+  // sim time at which the callback ran.
+  static std::atomic<long long> measurement_count{0};
+  const long long m_index = ++measurement_count;
+  auto & trace = ContinuityTrace::instance();
+  if (trace.enabled()) {
+    trace.write(trace_line(
+        "callback", current_time.seconds(), rclcpp::Time(msg->header.stamp).seconds(),
+        m_index, static_cast<long long>(msg->objects.size())));
+  }
   const auto result =
     core::process_measurement(channel_index, msg, current_time, state_, *debugger_);
+
+  // (2) QUEUE PUSH: whether the input manager accepted it, and whether that
+  // triggered processing.
+  if (trace.enabled()) {
+    trace.write(trace_line(
+        result.has_objects ? "queued" : "dropped_no_objects", current_time.seconds(),
+        rclcpp::Time(msg->header.stamp).seconds(), m_index,
+        static_cast<long long>(result.should_process)));
+  }
 
   if (!result.has_objects) {
     return;
@@ -351,8 +428,19 @@ void MultiObjectTracker::processObjects()
   const rclcpp::Time current_time = this->now();
 
   // Process objects batch (this will get objects internally and handle debug timing)
+  static std::atomic<long long> batch_count{0};
+  const long long b_index = ++batch_count;
   const auto result =
     core::process_objects_batch(current_time, params_, state_, *debugger_, get_logger());
+
+  // (3) PROCESS BATCH: how many measurement groups getObjects() handed over, and
+  // whether the batch asked to publish.
+  auto & trace = ContinuityTrace::instance();
+  if (trace.enabled()) {
+    trace.write(trace_line(
+        "batch", current_time.seconds(), state_.last_tracker_time.seconds(), b_index,
+        static_cast<long long>(result.should_publish)));
+  }
 
   // Publish without delay compensation
   if (result.should_publish) {
@@ -388,7 +476,25 @@ void MultiObjectTracker::publish()
 
     publishing_data = core::prepare_publishing_data(current_time, params_, state_, get_logger());
   }
+  // (4) PUBLISH CALL: the stamp and object count actually handed to the publisher,
+  // immediately before the DDS write, plus the publisher's own event count.
+  static std::atomic<long long> publish_count{0};
+  const long long p_index = ++publish_count;
+  auto & trace = ContinuityTrace::instance();
+  if (trace.enabled()) {
+    trace.write(trace_line(
+        "publish_call",
+        current_time.seconds(),
+        rclcpp::Time(publishing_data.tracked_objects.header.stamp).seconds(), p_index,
+        static_cast<long long>(publishing_data.tracked_objects.objects.size())));
+  }
   tracked_objects_pub_->publish(publishing_data.tracked_objects);
+  if (trace.enabled()) {
+    trace.write(trace_line(
+        "publish_returned", this->now().seconds(),
+        rclcpp::Time(publishing_data.tracked_objects.header.stamp).seconds(), p_index,
+        static_cast<long long>(tracked_objects_pub_->get_subscription_count())));
+  }
 
   debugger_->endPublishTime(this->now(), last_tracker_time);
 
