@@ -16,12 +16,15 @@
 
 #include "multi_object_tracker_node.hpp"
 
+#include "experiment_qos.hpp"
+
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <iomanip>
 #include <mutex>
-#include <sstream>
+#include <string>
+#include <vector>
 
 #include "autoware/multi_object_tracker/types.hpp"
 #include "autoware/multi_object_tracker/uncertainty/uncertainty_processor.hpp"
@@ -55,6 +58,115 @@ TrackerType parseTrackerType(const std::string & name, const std::string & param
       "'. Strict string match is required.");
   }
   return *tracker_type;
+}
+}  // namespace
+
+namespace
+{
+// CONTINUITY TRACE. Diagnostics only, and now non-perturbing: records go into a
+// bounded in-memory ring and are written once at shutdown, instead of a
+// synchronous fstream flush inside every callback. A per-callback fflush on the
+// executor thread is exactly the kind of overhead that can move the delivery
+// behaviour being measured.
+//
+// Stamps are INTEGER NANOSECONDS end to end. A nanosecond ROS stamp near 1.785e9
+// seconds needs 61 bits and a double carries 53, so seconds-as-double loses the
+// low ~8 bits: one ULP at that epoch is 238 ns, and comparing two double-valued
+// stamp sets reports differences that are pure rounding. Stamp IDENTITY cannot be
+// established that way, so it is never written that way.
+class ContinuityTrace
+{
+public:
+  static ContinuityTrace & instance()
+  {
+    static ContinuityTrace t;
+    return t;
+  }
+  bool enabled() const {return enabled_;}
+
+  void record(const char * stage, int64_t now_ns, int64_t stamp_ns,
+              int64_t index, int64_t size)
+  {
+    if (!enabled_) {return;}
+    std::lock_guard<std::mutex> lk(m_);
+    if (ring_.size() < capacity_) {
+      ring_.push_back(Rec{stage, now_ns, stamp_ns, index, size});
+    } else {
+      ++dropped_;                      // bounded: never grows without limit
+    }
+  }
+
+  void flush()
+  {
+    std::lock_guard<std::mutex> lk(m_);
+    if (!enabled_ || flushed_) {return;}
+    flushed_ = true;
+    std::FILE * fh = std::fopen(path_.c_str(), "a");
+    if (!fh) {return;}
+    for (const auto & r : ring_) {
+      std::fprintf(
+        fh, "{\"stage\":\"%s\",\"now_ns\":%lld,\"stamp_ns\":%lld,"
+        "\"index\":%lld,\"size\":%lld}\n", r.stage,
+        static_cast<long long>(r.now_ns), static_cast<long long>(r.stamp_ns),
+        static_cast<long long>(r.index), static_cast<long long>(r.size));
+    }
+    std::fprintf(
+      fh, "{\"stage\":\"trace_summary\",\"records\":%zu,\"dropped\":%lld,"
+      "\"capacity\":%zu}\n", ring_.size(), static_cast<long long>(dropped_), capacity_);
+    std::fclose(fh);
+  }
+
+private:
+  struct Rec
+  {
+    const char * stage;
+    int64_t now_ns, stamp_ns, index, size;
+  };
+  ContinuityTrace()
+  {
+    const char * p = std::getenv("TRACKER_TRACE");
+    if (p && *p) {
+      path_ = p;
+      enabled_ = true;
+      ring_.reserve(capacity_);
+    }
+  }
+  ~ContinuityTrace() {flush();}
+  bool enabled_{false};
+  bool flushed_{false};
+  std::string path_;
+  static constexpr size_t capacity_ = 1u << 20;   // ~1M records, then count drops
+  std::vector<Rec> ring_;
+  int64_t dropped_{0};
+  std::mutex m_;
+};
+
+int64_t to_ns(const builtin_interfaces::msg::Time & t)
+{
+  return static_cast<int64_t>(t.sec) * 1000000000LL + static_cast<int64_t>(t.nanosec);
+}
+
+// Detection-subscription history depth for the delivery experiment.
+//
+// Declared as a ROS parameter rather than read from the environment: a parameter
+// is typed, is visible in `ros2 param list`, is recorded in a launch dump, and
+// cannot be set to "10x" or "-1" without being rejected. The DEFAULT IS THE
+// SHIPPED VALUE OF 1, so an unconfigured node behaves exactly as upstream.
+using experiment::kSubDepthDefault;
+using experiment::kSubDepthMax;
+using experiment::kSubDepthMin;
+
+// Logs when the requested value is unusable, rather than silently coercing it: a
+// coerced depth would make an A/B report a depth it never ran at.
+int validate_sub_depth(int requested, const rclcpp::Logger & logger)
+{
+  if (!experiment::is_valid_sub_depth(requested)) {
+    RCLCPP_ERROR(
+      logger,
+      "detection_subscription_depth %d is outside [%d, %d]; using the shipped default %d",
+      requested, kSubDepthMin, kSubDepthMax, kSubDepthDefault);
+  }
+  return experiment::validated_sub_depth(requested);
 }
 }  // namespace
 
@@ -265,6 +377,21 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 
   ////// Create subscriptions and publishers
   // subscriptions
+  {
+    rcl_interfaces::msg::ParameterDescriptor d;
+    d.description =
+      "EXPERIMENT: KEEP_LAST history depth of each detection subscription. The "
+      "shipped value is 1; the upstream fusion publisher uses 10.";
+    rcl_interfaces::msg::IntegerRange range;
+    range.from_value = kSubDepthMin;
+    range.to_value = kSubDepthMax;
+    range.step = 1;
+    d.integer_range.push_back(range);
+    const int requested = this->declare_parameter<int>(
+      "detection_subscription_depth", kSubDepthDefault, d);
+    sub_depth_ = validate_sub_depth(requested, get_logger());
+    RCLCPP_INFO(get_logger(), "detection subscription KEEP_LAST depth = %d", sub_depth_);
+  }
   sub_objects_array_.resize(params_.input_channels_config.size());
   for (const auto & input_channel : params_.input_channels_config) {
     if (!input_channel.is_enabled) {
@@ -283,11 +410,8 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
         // publisher uses depth 10. The measured first loss is fusion -> this
         // callback, 59-69 of 424 messages in 5 of 5 runs, with every stage after
         // the callback conserving exactly. Raising ONLY this depth tests whether
-        // the loss is subscriber-queue overwrite.
-        input_channel_topic,
-        rclcpp::QoS{std::getenv("TRACKER_SUB_DEPTH")
-                    ? static_cast<size_t>(std::atoi(std::getenv("TRACKER_SUB_DEPTH")))
-                    : static_cast<size_t>(1)},
+        // the loss is subscriber-queue overwrite. Default is the shipped 1.
+        input_channel_topic, experiment::detection_qos(sub_depth_),
         [this,
          index](AUTOWARE_MESSAGE_CONST_SHARED_PTR(autoware_perception_msgs::msg::DetectedObjects)
                   msg) { this->onMeasurement(index, std::move(msg)); });
@@ -339,56 +463,6 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
   }
 }
 
-namespace
-{
-// CONTINUITY TRACE. Diagnostics only: nothing here changes association,
-// covariance, lifetime, batching or publish policy. Enabled only when
-// TRACKER_TRACE points at a writable path, so an unset environment leaves the
-// node byte-for-byte in its shipped behaviour.
-//
-// It exists to locate the FIRST loss or divergence along
-//   fusion visible -> tracker callback -> queue/process batch -> publish call
-//   -> DDS observers -> bag
-// which previous work could only bracket from the outside.
-class ContinuityTrace
-{
-public:
-  static ContinuityTrace & instance()
-  {
-    static ContinuityTrace t;
-    return t;
-  }
-  bool enabled() const {return fh_ != nullptr;}
-  void write(const std::string & line)
-  {
-    if (!fh_) {return;}
-    std::lock_guard<std::mutex> lk(m_);
-    std::fputs(line.c_str(), fh_);
-    std::fputc('\n', fh_);
-    std::fflush(fh_);      // crash-safe: the trace must survive a kill
-  }
-
-private:
-  ContinuityTrace()
-  {
-    const char * path = std::getenv("TRACKER_TRACE");
-    if (path && *path) {fh_ = std::fopen(path, "a");}
-  }
-  ~ContinuityTrace() {if (fh_) {std::fclose(fh_);}}
-  std::FILE * fh_{nullptr};
-  std::mutex m_;
-};
-
-std::string trace_line(
-  const char * stage, double now_s, double stamp_s, long long count, long long size)
-{
-  std::ostringstream o;
-  o.setf(std::ios::fixed);
-  o << "{\"stage\":\"" << stage << "\",\"now\":" << std::setprecision(9) << now_s
-    << ",\"stamp\":" << stamp_s << ",\"count\":" << count << ",\"size\":" << size << "}";
-  return o.str();
-}
-}  // namespace
 
 void MultiObjectTracker::onMeasurement(
   const size_t channel_index,
@@ -400,25 +474,20 @@ void MultiObjectTracker::onMeasurement(
   const rclcpp::Time current_time = this->now();
   // (1) CALLBACK RECEIPT: the measurement arrived here, with its own stamp and the
   // sim time at which the callback ran.
-  static std::atomic<long long> measurement_count{0};
-  const long long m_index = ++measurement_count;
+  static std::atomic<int64_t> measurement_count{0};
+  const int64_t m_index = ++measurement_count;
   auto & trace = ContinuityTrace::instance();
-  if (trace.enabled()) {
-    trace.write(trace_line(
-        "callback", current_time.seconds(), rclcpp::Time(msg->header.stamp).seconds(),
-        m_index, static_cast<long long>(msg->objects.size())));
-  }
+  const int64_t stamp_ns = to_ns(msg->header.stamp);
+  trace.record("callback", current_time.nanoseconds(), stamp_ns, m_index,
+               static_cast<int64_t>(msg->objects.size()));
   const auto result =
     core::process_measurement(channel_index, msg, current_time, state_, *debugger_);
 
   // (2) QUEUE PUSH: whether the input manager accepted it, and whether that
   // triggered processing.
-  if (trace.enabled()) {
-    trace.write(trace_line(
-        result.has_objects ? "queued" : "dropped_no_objects", current_time.seconds(),
-        rclcpp::Time(msg->header.stamp).seconds(), m_index,
-        static_cast<long long>(result.should_process)));
-  }
+  trace.record(result.has_objects ? "queued" : "dropped_no_objects",
+               current_time.nanoseconds(), stamp_ns, m_index,
+               static_cast<int64_t>(result.should_process));
 
   if (!result.has_objects) {
     return;
@@ -437,19 +506,22 @@ void MultiObjectTracker::processObjects()
   const rclcpp::Time current_time = this->now();
 
   // Process objects batch (this will get objects internally and handle debug timing)
-  static std::atomic<long long> batch_count{0};
-  const long long b_index = ++batch_count;
+  static std::atomic<int64_t> batch_count{0};
+  const int64_t b_index = ++batch_count;
   const auto result =
     core::process_objects_batch(current_time, params_, state_, *debugger_, get_logger());
 
-  // (3) PROCESS BATCH: how many measurement groups getObjects() handed over, and
-  // whether the batch asked to publish.
+  // (3) PROCESS BATCH. `size` is the number of measurement groups this batch
+  // consumed -- the actual batch COUNT. The previous record put should_publish in
+  // the size field, which was a boolean mislabelled as a batch size.
   auto & trace = ContinuityTrace::instance();
-  if (trace.enabled()) {
-    trace.write(trace_line(
-        "batch", current_time.seconds(), state_.last_tracker_time.seconds(), b_index,
-        static_cast<long long>(result.should_publish)));
-  }
+  trace.record("batch", current_time.nanoseconds(),
+               result.batch_count ? result.newest_group_stamp.nanoseconds()
+                                  : state_.last_tracker_time.nanoseconds(),
+               b_index, static_cast<int64_t>(result.batch_count));
+  trace.record("batch_should_publish", current_time.nanoseconds(),
+               state_.last_tracker_time.nanoseconds(), b_index,
+               static_cast<int64_t>(result.should_publish));
 
   // Publish without delay compensation
   if (result.should_publish) {
@@ -487,23 +559,15 @@ void MultiObjectTracker::publish()
   }
   // (4) PUBLISH CALL: the stamp and object count actually handed to the publisher,
   // immediately before the DDS write, plus the publisher's own event count.
-  static std::atomic<long long> publish_count{0};
-  const long long p_index = ++publish_count;
+  static std::atomic<int64_t> publish_count{0};
+  const int64_t p_index = ++publish_count;
   auto & trace = ContinuityTrace::instance();
-  if (trace.enabled()) {
-    trace.write(trace_line(
-        "publish_call",
-        current_time.seconds(),
-        rclcpp::Time(publishing_data.tracked_objects.header.stamp).seconds(), p_index,
-        static_cast<long long>(publishing_data.tracked_objects.objects.size())));
-  }
+  const int64_t out_stamp_ns = to_ns(publishing_data.tracked_objects.header.stamp);
+  trace.record("publish_call", current_time.nanoseconds(), out_stamp_ns, p_index,
+               static_cast<int64_t>(publishing_data.tracked_objects.objects.size()));
   tracked_objects_pub_->publish(publishing_data.tracked_objects);
-  if (trace.enabled()) {
-    trace.write(trace_line(
-        "publish_returned", this->now().seconds(),
-        rclcpp::Time(publishing_data.tracked_objects.header.stamp).seconds(), p_index,
-        static_cast<long long>(tracked_objects_pub_->get_subscription_count())));
-  }
+  trace.record("publish_returned", this->now().nanoseconds(), out_stamp_ns, p_index,
+               static_cast<int64_t>(tracked_objects_pub_->get_subscription_count()));
 
   debugger_->endPublishTime(this->now(), last_tracker_time);
 

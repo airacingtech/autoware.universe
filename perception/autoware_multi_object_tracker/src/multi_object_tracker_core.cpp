@@ -258,6 +258,8 @@ ObjectProcessingResult process_objects_batch(
   if (!is_objects_ready) {
     return result;
   }
+  result.batch_count = objects_with_associations.size();
+  result.newest_group_stamp = objects_with_associations.back().getTimestamp();
 
   // process start - start measurement time before processing
   debugger.startMeasurementTime(current_time, objects_with_associations.back().getTimestamp());

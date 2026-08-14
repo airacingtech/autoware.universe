@@ -97,6 +97,12 @@ struct MeasurementProcessingResult
 struct ObjectProcessingResult
 {
   bool should_publish;  // true if should publish immediately (no delay compensation)
+  // DIAGNOSTICS ONLY: how many measurement groups getObjects() handed over for
+  // this batch, and the newest group's stamp. Nothing reads these except the
+  // continuity trace; they exist so a batch record can carry the actual batch
+  // COUNT rather than a boolean mislabelled as a size.
+  size_t batch_count{0};
+  rclcpp::Time newest_group_stamp{0, 0, RCL_ROS_TIME};
 };
 
 struct PublishingData

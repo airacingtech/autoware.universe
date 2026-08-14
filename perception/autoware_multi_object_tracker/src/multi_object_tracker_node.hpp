@@ -40,6 +40,8 @@ public:
   explicit MultiObjectTracker(const rclcpp::NodeOptions & node_options);
 
 private:
+  // EXPERIMENT: detection-subscription KEEP_LAST depth (shipped default 1).
+  int sub_depth_{1};
   // ROS interface
   std::vector<AUTOWARE_SUBSCRIPTION_PTR(autoware_perception_msgs::msg::DetectedObjects)>
     sub_objects_array_{};
