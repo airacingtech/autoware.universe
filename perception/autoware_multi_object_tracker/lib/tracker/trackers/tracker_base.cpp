@@ -261,16 +261,6 @@ bool Tracker::updateWithoutMeasurement(const rclcpp::Time & timestamp)
   return true;
 }
 
-bool Tracker::coastAfterRejectedMeasurement()
-{
-  // Keep the already-predicted motion state and invalidate the output cache, but do not treat a
-  // short, associated radial disagreement as complete absence. The caller never refreshes the
-  // last accepted measurement time, so this grace cannot extend itself.
-  ++no_measurement_count_;
-  ++total_no_measurement_count_;
-  return true;
-}
-
 void Tracker::updateClassification(const std::vector<classes::Classification> & input)
 {
   // classification algorithm:

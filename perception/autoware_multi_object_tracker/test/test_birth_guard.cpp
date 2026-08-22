@@ -292,52 +292,6 @@ TEST_F(BirthGuardTest, WithholdsImpossibleSameBearingAssociatedUpdateWithoutSpaw
   EXPECT_NEAR(state_after_update.pose.position.y, prediction_before_update.pose.position.y, 1e-9);
 }
 
-TEST_F(BirthGuardTest, ModerateRadialGraceIsShortAndNonResetting)
-{
-  auto time = baseTime();
-  establishNearTracker(time);
-  const auto tracker = processor_->getListTracker().front();
-  const auto last_valid_measurement = tracker->getLatestMeasurementTime();
-  const float existence_before = tracker->getTotalExistenceProbability();
-  const auto channel_existence_before = tracker->getExistenceProbabilityVector();
-
-  for (int i = 0; i < 3; ++i) {
-    forceAssociatedUpdate(time, {14.75, 0.0});
-    ASSERT_EQ(processor_->getListTracker().size(), 1U);
-    EXPECT_FLOAT_EQ(tracker->getTotalExistenceProbability(), existence_before);
-    EXPECT_EQ(tracker->getLatestMeasurementTime(), last_valid_measurement);
-    time += rclcpp::Duration(50ms);
-  }
-
-  const auto channel_existence_during_grace = tracker->getExistenceProbabilityVector();
-  ASSERT_EQ(channel_existence_during_grace.size(), channel_existence_before.size());
-  for (size_t i = 0; i < channel_existence_before.size(); ++i) {
-    EXPECT_EQ(
-      channel_existence_during_grace[i].channel_index,
-      channel_existence_before[i].channel_index);
-    EXPECT_FLOAT_EQ(
-      channel_existence_during_grace[i].existence_probability,
-      channel_existence_before[i].existence_probability);
-  }
-
-  forceAssociatedUpdate(time, {14.75, 0.0});
-  EXPECT_LT(tracker->getTotalExistenceProbability(), existence_before);
-  EXPECT_EQ(tracker->getLatestMeasurementTime(), last_valid_measurement);
-}
-
-TEST_F(BirthGuardTest, HardDisplacementRejectDecaysWithoutGrace)
-{
-  auto time = baseTime();
-  establishNearTracker(time);
-  const auto tracker = processor_->getListTracker().front();
-  const float existence_before = tracker->getTotalExistenceProbability();
-
-  forceAssociatedUpdate(time, {15.1, 0.0});
-
-  EXPECT_LT(tracker->getTotalExistenceProbability(), existence_before);
-  EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
-}
-
 TEST_F(BirthGuardTest, AcceptsLaterValidUpdateAfterRejectedDepthMode)
 {
   auto time = baseTime();
