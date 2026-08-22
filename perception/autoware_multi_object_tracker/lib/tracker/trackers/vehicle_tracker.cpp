@@ -96,6 +96,7 @@ VehicleTracker::VehicleTracker(
           object.shape.dimensions.x, object_model_.size_limit.length_min,
           object_model_.size_limit.length_max)
       : object_model_.init_size.length;
+  nominal_length_ = initial_length;
 
   // Set motion model parameters
   motion_model_.setMotionParams(
@@ -145,7 +146,17 @@ VehicleTracker::VehicleTracker(
 
 bool VehicleTracker::predict(const rclcpp::Time & time)
 {
-  return motion_model_.predictState(time);
+  const bool predicted = motion_model_.predictState(time);
+  if (predicted && nominal_length_lock_active_) {
+    // Prediction advances the front and rear endpoints differently. Restore
+    // their fixed separation around the weighted vehicle center; CENTER is an
+    // exact center-preserving projection in BicycleMotionModel.
+    const bool length_restored = motion_model_.updateStateLength(
+      nominal_length_, BicycleMotionModel::LengthUpdateAnchor::CENTER);
+    removeCache();
+    return length_restored;
+  }
+  return predicted;
 }
 
 bool VehicleTracker::updateKinematics(
@@ -243,6 +254,14 @@ bool VehicleTracker::measure(
 
   const bool is_bbox = (corrected.shape.type == autoware_perception_msgs::msg::Shape::BOUNDING_BOX);
   updateKinematics(corrected, channel_info);
+  if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
+    nominal_length_lock_active_ = true;
+    // updateStatePose() represents a center observation as two endpoint
+    // observations and can alter their separation. Re-project them to the
+    // fixed nominal length without moving the estimated vehicle center.
+    motion_model_.updateStateLength(
+      nominal_length_, BicycleMotionModel::LengthUpdateAnchor::CENTER);
+  }
   if (channel_info.trust_extension && is_bbox) {
     shape_model_.updateShape(corrected);
   }
@@ -361,6 +380,8 @@ void VehicleTracker::setObjectShape(const autoware_perception_msgs::msg::Shape &
   const auto new_len = shape_model_.setShape(shape, getLatestMeasurementTime());
   if (new_len) {
     motion_model_.updateStateLength(*new_len, shape_update_anchor_);
+    // A later trusted shape becomes the new prior for any center-only channel.
+    nominal_length_ = *new_len;
   }
   shape_update_anchor_ = BicycleMotionModel::LengthUpdateAnchor::CENTER;
 }

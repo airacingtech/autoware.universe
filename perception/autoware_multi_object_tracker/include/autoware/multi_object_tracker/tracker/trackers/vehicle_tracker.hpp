@@ -43,6 +43,13 @@ private:
   // Consumed by setObjectShape() so UnstableShapeFilter commits the new length correctly.
   BicycleMotionModel::LengthUpdateAnchor shape_update_anchor_;
 
+  // A full-center channel with untrusted extension supplies a position
+  // measurement, not a new vehicle size. Keep the initial (or most recently
+  // trusted) length as a rigid prior so the bicycle endpoints cannot separate
+  // during turns or prediction-only gaps.
+  double nominal_length_{0.0};
+  bool nominal_length_lock_active_{false};
+
   // EKF kinematic update — selects update variant based on data availability.
   bool updateKinematics(
     const types::DynamicObject & object, const types::InputChannel & channel_info);

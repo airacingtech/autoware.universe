@@ -12,10 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "autoware/multi_object_tracker/object_model/object_model.hpp"
+#include "autoware/multi_object_tracker/tracker/trackers/vehicle_tracker.hpp"
 #include "autoware/multi_object_tracker/tracker/update/vehicle_update_strategy.hpp"
+#include "autoware/multi_object_tracker/types.hpp"
+
+#include <rclcpp/time.hpp>
+
+#include <autoware_perception_msgs/msg/shape.hpp>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 
 namespace autoware::multi_object_tracker
@@ -52,7 +60,76 @@ double expectedVar(double tracker_width, double polygon_width)
   const double half_dead_zone = 0.5 * std::abs(polygon_width - tracker_width);
   return half_dead_zone * half_dead_zone;
 }
+
+types::DynamicObject makeCenterObject(
+  const double x, const double y, const double length = 4.5718, const double width = 1.8)
+{
+  types::DynamicObject object;
+  object.channel_index = 0;
+  object.existence_probability = 0.9F;
+  object.classification = {{classes::Label::CAR, 1.0F}};
+  object.pose.position.x = x;
+  object.pose.position.y = y;
+  object.pose.orientation.w = 1.0;
+  object.pose_covariance.fill(0.0);
+  object.pose_covariance[0] = 0.01;
+  object.pose_covariance[7] = 0.01;
+  object.pose_covariance[14] = 1.0;
+  object.pose_covariance[21] = 1.0e6;
+  object.pose_covariance[28] = 1.0e6;
+  object.pose_covariance[35] = 1.0e6;
+  object.kinematics.has_position_covariance = true;
+  object.kinematics.orientation_availability = types::OrientationAvailability::UNAVAILABLE;
+  object.kinematics.has_twist = false;
+  object.shape.type = autoware_perception_msgs::msg::Shape::BOUNDING_BOX;
+  object.shape.dimensions.x = length;
+  object.shape.dimensions.y = width;
+  object.shape.dimensions.z = 1.2573;
+  object.trust_extension = false;
+  object.area = length * width;
+  return object;
+}
 }  // namespace
+
+TEST(VehicleCenterPosition, NominalLengthSurvivesTurningUpdatesAndPredictionGaps)
+{
+  constexpr double nominal_length = 4.5718;
+  constexpr double radius = 30.0;
+  constexpr double speed = 25.0;
+  constexpr int64_t step_ns = 50000000;  // 20 Hz prediction
+
+  const rclcpp::Time t0{0, 0, RCL_ROS_TIME};
+  VehicleTracker tracker(
+    object_model::normal_vehicle, t0, makeCenterObject(0.0, 0.0, nominal_length));
+
+  types::InputChannel channel{};
+  channel.index = 0;
+  channel.trust_extension = false;
+  channel.trust_orientation = false;
+  channel.trust_position_as_center = true;
+
+  // A 30 m-radius arc continually rotates the inferred heading. Measurements
+  // arrive at 5 Hz while prediction runs at 20 Hz, exercising the dropout path
+  // that previously let the two bicycle endpoints separate.
+  for (int i = 1; i <= 800; ++i) {
+    const rclcpp::Time time{static_cast<int64_t>(i) * step_ns, RCL_ROS_TIME};
+    ASSERT_TRUE(tracker.predict(time));
+    if (i == 1 || i % 4 == 0) {
+      const double elapsed_s = static_cast<double>(i * step_ns) * 1.0e-9;
+      const double angle = speed * elapsed_s / radius;
+      auto measurement = makeCenterObject(
+        radius * std::sin(angle), radius * (1.0 - std::cos(angle)),
+        // Deliberately bogus alternating dimensions must remain untrusted.
+        (i % 8 == 0) ? 20.0 : 1.0);
+      ASSERT_TRUE(tracker.updateWithMeasurement(measurement, time, channel));
+    }
+
+    types::DynamicObject output;
+    ASSERT_TRUE(tracker.getTrackedObject(time, output));
+    EXPECT_TRUE(std::isfinite(output.shape.dimensions.x));
+    EXPECT_NEAR(output.shape.dimensions.x, nominal_length, 1.0e-9) << "step=" << i;
+  }
+}
 
 // Equal widths: zero dead-zone, the two candidate centers coincide -> anchor untouched, no
 // variance.
