@@ -121,9 +121,10 @@ void TrackerProcessor::update(const types::AssociatedObjects & associated_object
         *tracker_itr, associated_object, time, channel_info.birth_guard.update_guard);
       if (update_guard_result.reject) {
         // Keep the association intact: spawn() will see measurement_to_tracker and cannot create a
-        // second UUID from the rejected alternate depth mode in this cycle.  Only the normal
-        // bounded no-measurement path is applied to the established tracker.
-        (*tracker_itr)->updateWithoutMeasurement(time);
+        // second UUID from the rejected alternate depth mode in this cycle. Keep the established
+        // track's motion prediction and confidence, while its unchanged last-valid-update time
+        // still enforces the normal one-second expiry bound.
+        (*tracker_itr)->coastAfterRejectedMeasurement();
         ++update_guard_rejected_count_;
         if (update_guard_result.used_no_ego_fallback) {
           ++update_guard_no_ego_rejected_count_;

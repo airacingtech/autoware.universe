@@ -279,6 +279,9 @@ TEST_F(BirthGuardTest, WithholdsImpossibleSameBearingAssociatedUpdateWithoutSpaw
   establishNearTracker(time);
   const auto tracker = processor_->getListTracker().front();
   const int measurements_before = tracker->getTotalMeasurementCount();
+  const float existence_before = tracker->getTotalExistenceProbability();
+  const auto channel_existence_before = tracker->getExistenceProbabilityVector();
+  const int total_misses_before = tracker->getTotalNoMeasurementCount();
 
   mot::types::DynamicObject prediction_before_update;
   forceAssociatedUpdate(time, {14.5, 0.0}, &prediction_before_update);
@@ -286,10 +289,67 @@ TEST_F(BirthGuardTest, WithholdsImpossibleSameBearingAssociatedUpdateWithoutSpaw
   ASSERT_EQ(processor_->getListTracker().size(), 1U);
   EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
   EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
+  EXPECT_EQ(tracker->getTotalNoMeasurementCount(), total_misses_before + 1);
+  EXPECT_FLOAT_EQ(tracker->getTotalExistenceProbability(), existence_before);
+  const auto channel_existence_after = tracker->getExistenceProbabilityVector();
+  ASSERT_EQ(channel_existence_after.size(), channel_existence_before.size());
+  for (size_t i = 0; i < channel_existence_before.size(); ++i) {
+    EXPECT_EQ(channel_existence_after[i].channel_index, channel_existence_before[i].channel_index);
+    EXPECT_FLOAT_EQ(
+      channel_existence_after[i].existence_probability,
+      channel_existence_before[i].existence_probability);
+  }
   mot::types::DynamicObject state_after_update;
   ASSERT_TRUE(tracker->getTrackedObject(time, state_after_update, false));
   EXPECT_NEAR(state_after_update.pose.position.x, prediction_before_update.pose.position.x, 1e-9);
   EXPECT_NEAR(state_after_update.pose.position.y, prediction_before_update.pose.position.y, 1e-9);
+}
+
+TEST_F(BirthGuardTest, RejectedUpdatesKeepOnlyABoundedPredictionCoastAlive)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const auto last_valid_measurement = tracker->getLatestMeasurementTime();
+  const float existence_before = tracker->getTotalExistenceProbability();
+
+  for (int i = 0; i < 19; ++i) {
+    forceAssociatedUpdate(time, {20.0, 0.0});
+    ASSERT_EQ(processor_->getListTracker().size(), 1U);
+    autoware_perception_msgs::msg::TrackedObjects output;
+    processor_->getTrackedObjects(time, output);
+    ASSERT_EQ(output.objects.size(), 1U);
+    EXPECT_EQ(output.objects.front().object_id.uuid, tracker->getUUID().uuid);
+    time += rclcpp::Duration(50ms);
+  }
+
+  EXPECT_FLOAT_EQ(tracker->getTotalExistenceProbability(), existence_before);
+  EXPECT_EQ(tracker->getLatestMeasurementTime(), last_valid_measurement);
+
+  // Rejected observations never refresh the accepted-measurement timestamp, so the existing
+  // one-second tracker expiry remains the hard upper bound on prediction-only output.
+  time = last_valid_measurement + rclcpp::Duration(1050ms);
+  forceAssociatedUpdate(time, {20.0, 0.0});
+  EXPECT_TRUE(processor_->getListTracker().empty());
+}
+
+TEST_F(BirthGuardTest, OrdinaryMissingDetectionStillDecaysExistence)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const float total_before = tracker->getTotalExistenceProbability();
+  const auto channels_before = tracker->getExistenceProbabilityVector();
+
+  process(time, {});
+
+  EXPECT_LT(tracker->getTotalExistenceProbability(), total_before);
+  const auto channels_after = tracker->getExistenceProbabilityVector();
+  ASSERT_EQ(channels_after.size(), channels_before.size());
+  for (size_t i = 0; i < channels_before.size(); ++i) {
+    EXPECT_EQ(channels_after[i].channel_index, channels_before[i].channel_index);
+    EXPECT_LT(channels_after[i].existence_probability, channels_before[i].existence_probability);
+  }
 }
 
 TEST_F(BirthGuardTest, AcceptsLaterValidUpdateAfterRejectedDepthMode)

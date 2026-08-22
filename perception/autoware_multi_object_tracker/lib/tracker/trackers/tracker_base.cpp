@@ -261,6 +261,16 @@ bool Tracker::updateWithoutMeasurement(const rclcpp::Time & timestamp)
   return true;
 }
 
+bool Tracker::coastAfterRejectedMeasurement()
+{
+  // An associated object supplies existence evidence, but its position is unsafe for the motion
+  // filter. Preserve confidence without refreshing the last valid measurement timestamp; the
+  // normal expiry policy therefore still bounds this prediction-only coast.
+  ++no_measurement_count_;
+  ++total_no_measurement_count_;
+  return true;
+}
+
 void Tracker::updateClassification(const std::vector<classes::Classification> & input)
 {
   // classification algorithm:
