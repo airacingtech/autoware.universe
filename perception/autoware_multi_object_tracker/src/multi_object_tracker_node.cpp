@@ -247,6 +247,40 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       input_channel_config.trust_position_as_center = declare_parameter<bool>(
         input_channel_config_name + ".flags.can_trust_position_as_center", false);
 
+      // Camera depth ambiguity birth guard.  This is opt-in per channel; keeping `enabled` absent
+      // or false preserves the shipped spawn behavior for generic, LiDAR, and radar inputs.
+      auto & birth_guard = input_channel_config.birth_guard;
+      const std::string birth_guard_name = input_channel_config_name + ".birth_guard.";
+      birth_guard.enabled =
+        declare_parameter<bool>(birth_guard_name + "enabled", birth_guard.enabled);
+      birth_guard.min_confirmations = declare_parameter<int>(
+        birth_guard_name + "min_confirmations", birth_guard.min_confirmations);
+      birth_guard.min_established_measurements = declare_parameter<int>(
+        birth_guard_name + "min_established_measurements",
+        birth_guard.min_established_measurements);
+      birth_guard.hypothesis_timeout_sec = declare_parameter<double>(
+        birth_guard_name + "hypothesis_timeout_sec", birth_guard.hypothesis_timeout_sec);
+      birth_guard.hypothesis_match_distance_m = declare_parameter<double>(
+        birth_guard_name + "hypothesis_match_distance_m",
+        birth_guard.hypothesis_match_distance_m);
+      birth_guard.hypothesis_max_speed_mps = declare_parameter<double>(
+        birth_guard_name + "hypothesis_max_speed_mps", birth_guard.hypothesis_max_speed_mps);
+      birth_guard.conflict_max_coast_age_sec = declare_parameter<double>(
+        birth_guard_name + "conflict_max_coast_age_sec",
+        birth_guard.conflict_max_coast_age_sec);
+      birth_guard.conflict_min_range_gap_m = declare_parameter<double>(
+        birth_guard_name + "conflict_min_range_gap_m", birth_guard.conflict_min_range_gap_m);
+      birth_guard.conflict_max_bearing_deg = declare_parameter<double>(
+        birth_guard_name + "conflict_max_bearing_deg", birth_guard.conflict_max_bearing_deg);
+
+      if (!types::isValidBirthGuardConfig(birth_guard)) {
+        throw std::invalid_argument(
+          birth_guard_name +
+          " has invalid values: every floating-point value must be finite, counts must be >= 1, "
+          "distances/speeds must be non-negative, timeouts/range gap must be positive, and "
+          "bearing must be in (0, 180) degrees");
+      }
+
       // association algorithm selection for this channel (default: "bev")
       {
         const std::string associator_type_str =

@@ -28,6 +28,7 @@
 #include "autoware_perception_msgs/msg/tracked_objects.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
 
+#include <cstdint>
 #include <list>
 #include <memory>
 #include <optional>
@@ -70,6 +71,15 @@ public:
   void setTimeKeeper(std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper_ptr);
 
 private:
+  struct BirthHypothesis
+  {
+    uint channel_index;
+    classes::Label label;
+    geometry_msgs::msg::Point position;
+    rclcpp::Time last_observation_time;
+    int confirmation_count;
+  };
+
   const TrackerConfigs tracker_configs_;
   const TrackerCreationConfig creation_config_;
   const std::vector<types::InputChannel> & channels_config_;
@@ -82,10 +92,29 @@ private:
   mutable rclcpp::Time last_prune_time_;
 
   std::list<std::shared_ptr<Tracker>> list_tracker_;
+  std::list<BirthHypothesis> birth_hypotheses_;
+  uint64_t birth_guard_quarantined_count_{0};
+  uint64_t birth_guard_released_count_{0};
+  uint64_t birth_guard_expired_count_{0};
+  uint64_t birth_guard_no_ego_withheld_count_{0};
+  uint64_t birth_guard_nonfinite_rejected_count_{0};
   std::optional<geometry_msgs::msg::Pose> getEgoPose() const;
   void removeOldTracker(const rclcpp::Time & time);
   std::shared_ptr<Tracker> createNewTracker(
     const types::DynamicObject & object, const rclcpp::Time & time) const;
+  void addTracker(
+    const types::DynamicObject & object, const rclcpp::Time & time,
+    const types::InputChannel & channel_config);
+  void pruneBirthHypotheses(
+    const rclcpp::Time & time, uint channel_index,
+    const types::InputChannel::BirthGuard & config);
+  std::list<BirthHypothesis>::iterator findBirthHypothesis(
+    const types::DynamicObject & object, const rclcpp::Time & time,
+    const types::InputChannel::BirthGuard & config);
+  bool conflictsWithCoastingTracker(
+    const types::DynamicObject & object, const rclcpp::Time & time,
+    const types::InputChannel::BirthGuard & config) const;
+  void logBirthGuardStats(const char * event, uint channel_index) const;
 
   std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper_;
   AdaptiveThresholdCache adaptive_threshold_cache_;

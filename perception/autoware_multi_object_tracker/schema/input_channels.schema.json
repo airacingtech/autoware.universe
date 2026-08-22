@@ -47,6 +47,58 @@
             }
           }
         },
+        "birth_guard": {
+          "type": "object",
+          "description": "Opt-in birth quarantine for a farther, same-bearing camera measurement while an established tracker is coasting. Disabled by default so generic/LiDAR/radar behavior is unchanged. Guard-enabled unmatched births fail closed while ego pose is unavailable, and non-finite measurement XY is rejected. If the nearer car is occluded, a real collinear farther car can be delayed, but only for conflict_max_coast_age_sec or until the old tracker is observed/pruned.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "min_confirmations": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3
+            },
+            "min_established_measurements": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 2
+            },
+            "hypothesis_timeout_sec": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "default": 0.35
+            },
+            "hypothesis_match_distance_m": {
+              "type": "number",
+              "minimum": 0.0,
+              "default": 3.0
+            },
+            "hypothesis_max_speed_mps": {
+              "type": "number",
+              "minimum": 0.0,
+              "default": 100.0
+            },
+            "conflict_max_coast_age_sec": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "default": 0.8
+            },
+            "conflict_min_range_gap_m": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "default": 12.0
+            },
+            "conflict_max_bearing_deg": {
+              "type": "number",
+              "exclusiveMinimum": 0.0,
+              "exclusiveMaximum": 180.0,
+              "default": 2.0
+            }
+          },
+          "additionalProperties": false
+        },
         "optional": {
           "type": "object",
           "properties": {

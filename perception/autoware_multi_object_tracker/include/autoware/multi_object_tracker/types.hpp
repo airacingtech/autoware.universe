@@ -36,6 +36,7 @@
 #include <boost/optional.hpp>
 
 #include <array>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -231,7 +232,39 @@ struct InputChannel
   // True when pose.position is the full object's geometric center even if the
   // reported extension is only nominal or otherwise untrusted.
   bool trust_position_as_center = false;
+
+  // Opt-in guard for camera-only depth ambiguity.  It is deliberately scoped to tracker birth:
+  // existing tracks continue through the normal prediction/update path and measurements are never
+  // replaced with predictions.  Defaults keep the upstream behavior unchanged for every channel.
+  struct BirthGuard
+  {
+    bool enabled = false;
+    int min_confirmations = 3;
+    int min_established_measurements = 2;
+    double hypothesis_timeout_sec = 0.35;
+    double hypothesis_match_distance_m = 3.0;
+    double hypothesis_max_speed_mps = 100.0;
+    double conflict_max_coast_age_sec = 0.8;
+    double conflict_min_range_gap_m = 12.0;
+    double conflict_max_bearing_deg = 2.0;
+  } birth_guard;
 };
+
+inline bool isValidBirthGuardConfig(const InputChannel::BirthGuard & config)
+{
+  const bool all_finite =
+    std::isfinite(config.hypothesis_timeout_sec) &&
+    std::isfinite(config.hypothesis_match_distance_m) &&
+    std::isfinite(config.hypothesis_max_speed_mps) &&
+    std::isfinite(config.conflict_max_coast_age_sec) &&
+    std::isfinite(config.conflict_min_range_gap_m) &&
+    std::isfinite(config.conflict_max_bearing_deg);
+  return all_finite && config.min_confirmations >= 1 &&
+         config.min_established_measurements >= 1 && config.hypothesis_timeout_sec > 0.0 &&
+         config.hypothesis_match_distance_m >= 0.0 && config.hypothesis_max_speed_mps >= 0.0 &&
+         config.conflict_max_coast_age_sec > 0.0 && config.conflict_min_range_gap_m > 0.0 &&
+         config.conflict_max_bearing_deg > 0.0 && config.conflict_max_bearing_deg < 180.0;
+}
 
 struct ExistenceProbability
 {
