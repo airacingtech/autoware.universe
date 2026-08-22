@@ -80,6 +80,16 @@ private:
     int confirmation_count;
   };
 
+  struct UpdateGuardResult
+  {
+    bool reject{false};
+    bool used_no_ego_fallback{false};
+    bool invalid_input{false};
+    double innovation_m{0.0};
+    double allowance_m{0.0};
+    double bearing_difference_deg{-1.0};
+  };
+
   const TrackerConfigs tracker_configs_;
   const TrackerCreationConfig creation_config_;
   const std::vector<types::InputChannel> & channels_config_;
@@ -98,6 +108,9 @@ private:
   uint64_t birth_guard_expired_count_{0};
   uint64_t birth_guard_no_ego_withheld_count_{0};
   uint64_t birth_guard_nonfinite_rejected_count_{0};
+  uint64_t update_guard_rejected_count_{0};
+  uint64_t update_guard_no_ego_rejected_count_{0};
+  uint64_t update_guard_invalid_rejected_count_{0};
   std::optional<geometry_msgs::msg::Pose> getEgoPose() const;
   void removeOldTracker(const rclcpp::Time & time);
   std::shared_ptr<Tracker> createNewTracker(
@@ -114,6 +127,9 @@ private:
   bool conflictsWithCoastingTracker(
     const types::DynamicObject & object, const rclcpp::Time & time,
     const types::InputChannel::BirthGuard & config) const;
+  UpdateGuardResult evaluateAssociatedUpdate(
+    const std::shared_ptr<Tracker> & tracker, const types::DynamicObject & measurement,
+    const rclcpp::Time & time, const types::InputChannel::BirthGuard::UpdateGuard & config) const;
   void logBirthGuardStats(const char * event, uint channel_index) const;
 
   std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper_;

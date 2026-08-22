@@ -117,6 +117,31 @@ void TrackerProcessor::update(const types::AssociatedObjects & associated_object
     if (found) {
       const auto & associated_object = detected_objects.objects.at(measurement_idx);
       const types::InputChannel channel_info = channels_config_[associated_object.channel_index];
+      const auto update_guard_result = evaluateAssociatedUpdate(
+        *tracker_itr, associated_object, time, channel_info.birth_guard.update_guard);
+      if (update_guard_result.reject) {
+        // Keep the association intact: spawn() will see measurement_to_tracker and cannot create a
+        // second UUID from the rejected alternate depth mode in this cycle.  Only the normal
+        // bounded no-measurement path is applied to the established tracker.
+        (*tracker_itr)->updateWithoutMeasurement(time);
+        ++update_guard_rejected_count_;
+        if (update_guard_result.used_no_ego_fallback) {
+          ++update_guard_no_ego_rejected_count_;
+        }
+        if (update_guard_result.invalid_input) {
+          ++update_guard_invalid_rejected_count_;
+        }
+        logBirthGuardStats("associated_update_rejected", associated_object.channel_index);
+        RCLCPP_WARN_THROTTLE(
+          logger_, *clock_, 1000,
+          "Withheld associated camera update on channel %u for tracker %s: radial/XY "
+          "innovation=%.2f m allowance=%.2f m bearing_delta=%.2f deg; tracker is coasting and "
+          "the consumed measurement cannot spawn a new UUID in this cycle",
+          associated_object.channel_index, (*tracker_itr)->getUuidString().c_str(),
+          update_guard_result.innovation_m, update_guard_result.allowance_m,
+          update_guard_result.bearing_difference_deg);
+        continue;
+      }
       const bool has_significant_shape_change = association_result.wasShapeChanged(tracker_uuid);
       (*tracker_itr)
         ->setEgoPose(ego_pose_ ? std::make_optional(ego_pose_->pose.position) : std::nullopt);
@@ -127,6 +152,124 @@ void TrackerProcessor::update(const types::AssociatedObjects & associated_object
       (*(tracker_itr))->updateWithoutMeasurement(time);
     }
   }
+}
+
+TrackerProcessor::UpdateGuardResult TrackerProcessor::evaluateAssociatedUpdate(
+  const std::shared_ptr<Tracker> & tracker, const types::DynamicObject & measurement,
+  const rclcpp::Time & time, const types::InputChannel::BirthGuard::UpdateGuard & config) const
+{
+  UpdateGuardResult result;
+  if (!config.enabled) {
+    return result;
+  }
+
+  types::DynamicObject prediction;
+  if (!tracker->getTrackedObject(time, prediction, false)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+
+  const auto finite_xy = [](const geometry_msgs::msg::Point & point) {
+    return std::isfinite(point.x) && std::isfinite(point.y);
+  };
+  if (!finite_xy(measurement.pose.position) || !finite_xy(prediction.pose.position)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+
+  const double elapsed_sec = tracker->getElapsedTimeFromLastUpdate(time);
+  if (elapsed_sec < 0.0 || !std::isfinite(elapsed_sec)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+  const double bounded_elapsed_sec = std::min(elapsed_sec, config.max_elapsed_sec);
+  result.allowance_m = std::min(
+    config.max_allowance_m,
+    config.base_allowance_m + config.max_innovation_speed_mps * bounded_elapsed_sec);
+  if (!std::isfinite(result.allowance_m)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+
+  const double dx = measurement.pose.position.x - prediction.pose.position.x;
+  const double dy = measurement.pose.position.y - prediction.pose.position.y;
+  const double euclidean_innovation = std::hypot(dx, dy);
+  if (!std::isfinite(euclidean_innovation)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+  const bool has_usable_ego_pose = ego_pose_ && finite_xy(ego_pose_->pose.position);
+
+  // Velocity needs multiple accepted measurements to bootstrap.  Before that point, do not apply
+  // the tighter velocity-relative radial gate, but still reject a mode switch beyond a loose hard
+  // displacement cap.  The same cap closes the discontinuity just outside max_bearing_deg.
+  if (euclidean_innovation > config.max_euclidean_innovation_m) {
+    result.used_no_ego_fallback = !has_usable_ego_pose;
+    result.innovation_m = euclidean_innovation;
+    result.allowance_m = config.max_euclidean_innovation_m;
+    result.reject = true;
+    return result;
+  }
+  if (tracker->getTotalMeasurementCount() < config.min_measurements) {
+    return result;
+  }
+
+  if (!has_usable_ego_pose) {
+    // Fail closed on a physically impossible associated displacement when odometry/TF is absent.
+    // The fallback is intentionally the looser Euclidean cap because bearing/range cannot be
+    // established safely; the tighter radial allowance has no valid geometry here.
+    result.used_no_ego_fallback = true;
+    result.innovation_m = euclidean_innovation;
+    result.allowance_m = config.max_euclidean_innovation_m;
+    result.reject = result.innovation_m > config.max_euclidean_innovation_m;
+    return result;
+  }
+
+  const auto & ego = ego_pose_->pose.position;
+  const double tracker_x = prediction.pose.position.x - ego.x;
+  const double tracker_y = prediction.pose.position.y - ego.y;
+  const double measurement_x = measurement.pose.position.x - ego.x;
+  const double measurement_y = measurement.pose.position.y - ego.y;
+  const double tracker_range = std::hypot(tracker_x, tracker_y);
+  const double measurement_range = std::hypot(measurement_x, measurement_y);
+  if (
+    !std::isfinite(tracker_range) || !std::isfinite(measurement_range) || tracker_range <= 1e-6 ||
+    measurement_range <= 1e-6) {
+    // Degenerate ego-relative geometry still gets the bounded Euclidean check instead of silently
+    // failing open.
+    result.used_no_ego_fallback = true;
+    result.innovation_m = euclidean_innovation;
+    result.allowance_m = config.max_euclidean_innovation_m;
+    result.reject = result.innovation_m > config.max_euclidean_innovation_m;
+    return result;
+  }
+
+  const double cross = tracker_x * measurement_y - tracker_y * measurement_x;
+  const double dot = tracker_x * measurement_x + tracker_y * measurement_y;
+  const double bearing_difference = std::abs(std::atan2(cross, dot));
+  constexpr double radians_to_degrees = 180.0 / 3.14159265358979323846;
+  result.bearing_difference_deg = bearing_difference * radians_to_degrees;
+  if (!std::isfinite(result.bearing_difference_deg)) {
+    result.reject = true;
+    result.invalid_input = true;
+    return result;
+  }
+  if (result.bearing_difference_deg > config.max_bearing_deg) {
+    return result;
+  }
+
+  // The prediction already contains the tracker's estimated velocity and process covariance.
+  // Association remains the statistical covariance gate.  This extra camera-only check is a
+  // physical bound on unexplained radial motion; allowing raw monocular depth covariance here
+  // would make alternate ray/mesh modes fail open again.
+  result.innovation_m = std::abs(measurement_range - tracker_range);
+  result.reject = result.innovation_m > result.allowance_m;
+  return result;
 }
 
 void TrackerProcessor::spawn(const types::AssociatedObjects & associated_objects)
@@ -341,13 +484,16 @@ void TrackerProcessor::logBirthGuardStats(const char * event, const uint channel
   RCLCPP_INFO_THROTTLE(
     logger_, *clock_, 1000,
     "Birth guard %s on channel %u: quarantined=%llu released=%llu expired=%llu "
-    "no_ego_withheld=%llu nonfinite_rejected=%llu active=%zu",
+    "no_ego_withheld=%llu nonfinite_rejected=%llu active=%zu update_rejected=%llu "
+    "update_no_ego_rejected=%llu update_invalid_rejected=%llu",
     event, channel_index, static_cast<unsigned long long>(birth_guard_quarantined_count_),
     static_cast<unsigned long long>(birth_guard_released_count_),
     static_cast<unsigned long long>(birth_guard_expired_count_),
     static_cast<unsigned long long>(birth_guard_no_ego_withheld_count_),
     static_cast<unsigned long long>(birth_guard_nonfinite_rejected_count_),
-    birth_hypotheses_.size());
+    birth_hypotheses_.size(), static_cast<unsigned long long>(update_guard_rejected_count_),
+    static_cast<unsigned long long>(update_guard_no_ego_rejected_count_),
+    static_cast<unsigned long long>(update_guard_invalid_rejected_count_));
 }
 
 std::shared_ptr<Tracker> TrackerProcessor::createNewTracker(

@@ -25,6 +25,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -60,6 +61,14 @@ protected:
     channels_.front().birth_guard.conflict_max_coast_age_sec = 0.8;
     channels_.front().birth_guard.conflict_min_range_gap_m = 12.0;
     channels_.front().birth_guard.conflict_max_bearing_deg = 2.0;
+    channels_.front().birth_guard.update_guard.enabled = true;
+    channels_.front().birth_guard.update_guard.min_measurements = 3;
+    channels_.front().birth_guard.update_guard.base_allowance_m = 0.75;
+    channels_.front().birth_guard.update_guard.max_innovation_speed_mps = 35.0;
+    channels_.front().birth_guard.update_guard.max_elapsed_sec = 0.15;
+    channels_.front().birth_guard.update_guard.max_allowance_m = 4.5;
+    channels_.front().birth_guard.update_guard.max_bearing_deg = 2.0;
+    channels_.front().birth_guard.update_guard.max_euclidean_innovation_m = 5.0;
     resetProcessor();
   }
 
@@ -145,6 +154,35 @@ protected:
       time += rclcpp::Duration(50ms);
     }
     ASSERT_EQ(processor_->getListTracker().size(), 1U);
+  }
+
+  void forceAssociatedUpdate(
+    const rclcpp::Time & time, const std::pair<double, double> position,
+    mot::types::DynamicObject * prediction_before_update = nullptr, const bool ego_available = true)
+  {
+    ASSERT_EQ(processor_->getListTracker().size(), 1U);
+    if (ego_available) {
+      geometry_msgs::msg::PoseStamped ego;
+      ego.header.stamp = time;
+      ego.header.frame_id = "map";
+      ego.pose.orientation.w = 1.0;
+      processor_->updateEgoPose(ego);
+    } else {
+      processor_->updateEgoPose(std::nullopt);
+    }
+    processor_->predictTrackers(time);
+
+    const auto tracker = processor_->getListTracker().front();
+    if (prediction_before_update) {
+      ASSERT_TRUE(tracker->getTrackedObject(time, *prediction_before_update, false));
+    }
+    auto objects = makeObjects(time, {position});
+    mot::types::AssociationResult association;
+    association.add(tracker->getUUID(), objects.objects.front().uuid);
+    const mot::types::AssociatedObjects associated{objects, association};
+    processor_->update(associated);
+    processor_->prune(time);
+    processor_->spawn(associated);
   }
 
   mot::TrackerConfigs tracker_configs_;
@@ -235,10 +273,142 @@ TEST_F(BirthGuardTest, CollinearSecondCarDelayEndsAtConfiguredCoastBound)
   EXPECT_EQ(processor_->getListTracker().size(), 2U);
 }
 
+TEST_F(BirthGuardTest, WithholdsImpossibleSameBearingAssociatedUpdateWithoutSpawning)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const int measurements_before = tracker->getTotalMeasurementCount();
+
+  mot::types::DynamicObject prediction_before_update;
+  forceAssociatedUpdate(time, {14.5, 0.0}, &prediction_before_update);
+
+  ASSERT_EQ(processor_->getListTracker().size(), 1U);
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
+  mot::types::DynamicObject state_after_update;
+  ASSERT_TRUE(tracker->getTrackedObject(time, state_after_update, false));
+  EXPECT_NEAR(state_after_update.pose.position.x, prediction_before_update.pose.position.x, 1e-9);
+  EXPECT_NEAR(state_after_update.pose.position.y, prediction_before_update.pose.position.y, 1e-9);
+}
+
+TEST_F(BirthGuardTest, AcceptsLaterValidUpdateAfterRejectedDepthMode)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+
+  forceAssociatedUpdate(time, {14.5, 0.0});
+  const int measurements_after_rejection = tracker->getTotalMeasurementCount();
+  time += rclcpp::Duration(50ms);
+  forceAssociatedUpdate(time, {10.2, 0.0});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_after_rejection + 1);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 0);
+  EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
+TEST_F(BirthGuardTest, NormalAssociatedUpdateRemainsAccepted)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const int measurements_before = tracker->getTotalMeasurementCount();
+
+  forceAssociatedUpdate(time, {10.4, 0.0});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before + 1);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 0);
+}
+
+TEST_F(BirthGuardTest, DisabledUpdateGuardKeepsAssociatedUpdateBehavior)
+{
+  channels_.front().birth_guard.update_guard.enabled = false;
+  resetProcessor();
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const int measurements_before = tracker->getTotalMeasurementCount();
+
+  forceAssociatedUpdate(time, {14.5, 0.0});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before + 1);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 0);
+}
+
+TEST_F(BirthGuardTest, VelocityBootstrapAcceptsMotionBeforeMinimumMeasurements)
+{
+  auto time = baseTime();
+  process(time, {{10.0, 0.0}});
+  ASSERT_EQ(processor_->getListTracker().size(), 1U);
+  const auto tracker = processor_->getListTracker().front();
+  ASSERT_EQ(tracker->getTotalMeasurementCount(), 1);
+
+  time += rclcpp::Duration(50ms);
+  forceAssociatedUpdate(time, {14.0, 0.0});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), 2);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 0);
+}
+
+TEST_F(BirthGuardTest, LongCoastCannotGrowRadialAllowancePastCap)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const int measurements_before = tracker->getTotalMeasurementCount();
+
+  time += rclcpp::Duration(300ms);
+  forceAssociatedUpdate(time, {14.75, 0.0});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
+}
+
+TEST_F(BirthGuardTest, MissingEgoUsesLooseEuclideanCap)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  auto tracker = processor_->getListTracker().front();
+  int measurements_before = tracker->getTotalMeasurementCount();
+
+  forceAssociatedUpdate(time, {14.0, 0.0}, nullptr, false);
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before + 1);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 0);
+
+  resetProcessor();
+  time = baseTime();
+  establishNearTracker(time);
+  tracker = processor_->getListTracker().front();
+  measurements_before = tracker->getTotalMeasurementCount();
+
+  forceAssociatedUpdate(time, {15.1, 0.0}, nullptr, false);
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
+  EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
+TEST_F(BirthGuardTest, LooseEuclideanCapRejectsHugeJumpJustOutsideBearingGate)
+{
+  auto time = baseTime();
+  establishNearTracker(time);
+  const auto tracker = processor_->getListTracker().front();
+  const int measurements_before = tracker->getTotalMeasurementCount();
+  constexpr double angle_rad = 2.1 * 3.14159265358979323846 / 180.0;
+
+  forceAssociatedUpdate(time, {20.0 * std::cos(angle_rad), 20.0 * std::sin(angle_rad)});
+
+  EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
+  EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
+  EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
 TEST(BirthGuardConfigValidation, RejectsEveryNonFiniteDouble)
 {
   using Config = mot::types::InputChannel::BirthGuard;
-  constexpr std::array<double Config::*, 6> double_fields = {
+  constexpr std::array<double Config::*, 6> birth_double_fields = {
     &Config::hypothesis_timeout_sec,
     &Config::hypothesis_match_distance_m,
     &Config::hypothesis_max_speed_mps,
@@ -246,9 +416,18 @@ TEST(BirthGuardConfigValidation, RejectsEveryNonFiniteDouble)
     &Config::conflict_min_range_gap_m,
     &Config::conflict_max_bearing_deg,
   };
+  using UpdateConfig = Config::UpdateGuard;
+  constexpr std::array<double UpdateConfig::*, 6> update_double_fields = {
+    &UpdateConfig::base_allowance_m,
+    &UpdateConfig::max_innovation_speed_mps,
+    &UpdateConfig::max_elapsed_sec,
+    &UpdateConfig::max_allowance_m,
+    &UpdateConfig::max_bearing_deg,
+    &UpdateConfig::max_euclidean_innovation_m,
+  };
 
   EXPECT_TRUE(mot::types::isValidBirthGuardConfig(Config{}));
-  for (const auto field : double_fields) {
+  for (const auto field : birth_double_fields) {
     for (const double invalid : {
            std::numeric_limits<double>::quiet_NaN(),
            std::numeric_limits<double>::infinity(),
@@ -258,6 +437,30 @@ TEST(BirthGuardConfigValidation, RejectsEveryNonFiniteDouble)
       EXPECT_FALSE(mot::types::isValidBirthGuardConfig(config));
     }
   }
+  for (const auto field : update_double_fields) {
+    for (const double invalid : {
+           std::numeric_limits<double>::quiet_NaN(),
+           std::numeric_limits<double>::infinity(),
+           -std::numeric_limits<double>::infinity()}) {
+      Config config;
+      config.update_guard.*field = invalid;
+      EXPECT_FALSE(mot::types::isValidBirthGuardConfig(config));
+    }
+  }
+
+  Config allowance_order;
+  allowance_order.update_guard.max_allowance_m =
+    allowance_order.update_guard.base_allowance_m - 0.1;
+  EXPECT_FALSE(mot::types::isValidBirthGuardConfig(allowance_order));
+
+  Config insufficient_bootstrap;
+  insufficient_bootstrap.update_guard.min_measurements = 2;
+  EXPECT_FALSE(mot::types::isValidBirthGuardConfig(insufficient_bootstrap));
+
+  Config euclidean_order;
+  euclidean_order.update_guard.max_euclidean_innovation_m =
+    euclidean_order.update_guard.max_allowance_m - 0.1;
+  EXPECT_FALSE(mot::types::isValidBirthGuardConfig(euclidean_order));
 }
 
 TEST_F(BirthGuardTest, MissingEgoPoseWithholdsBirthUntilGeometryReturns)

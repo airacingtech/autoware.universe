@@ -273,12 +273,34 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       birth_guard.conflict_max_bearing_deg = declare_parameter<double>(
         birth_guard_name + "conflict_max_bearing_deg", birth_guard.conflict_max_bearing_deg);
 
+      auto & update_guard = birth_guard.update_guard;
+      const std::string update_guard_name = birth_guard_name + "update_guard.";
+      update_guard.enabled =
+        declare_parameter<bool>(update_guard_name + "enabled", update_guard.enabled);
+      update_guard.min_measurements = declare_parameter<int>(
+        update_guard_name + "min_measurements", update_guard.min_measurements);
+      update_guard.base_allowance_m = declare_parameter<double>(
+        update_guard_name + "base_allowance_m", update_guard.base_allowance_m);
+      update_guard.max_innovation_speed_mps = declare_parameter<double>(
+        update_guard_name + "max_innovation_speed_mps", update_guard.max_innovation_speed_mps);
+      update_guard.max_elapsed_sec = declare_parameter<double>(
+        update_guard_name + "max_elapsed_sec", update_guard.max_elapsed_sec);
+      update_guard.max_allowance_m = declare_parameter<double>(
+        update_guard_name + "max_allowance_m", update_guard.max_allowance_m);
+      update_guard.max_bearing_deg = declare_parameter<double>(
+        update_guard_name + "max_bearing_deg", update_guard.max_bearing_deg);
+      update_guard.max_euclidean_innovation_m = declare_parameter<double>(
+        update_guard_name + "max_euclidean_innovation_m",
+        update_guard.max_euclidean_innovation_m);
+
       if (!types::isValidBirthGuardConfig(birth_guard)) {
         throw std::invalid_argument(
           birth_guard_name +
-          " has invalid values: every floating-point value must be finite, counts must be >= 1, "
-          "distances/speeds must be non-negative, timeouts/range gap must be positive, and "
-          "bearing must be in (0, 180) degrees");
+          " has invalid values: every floating-point value must be finite, birth counts must be "
+          ">= 1, update min_measurements must be >= 3, distances/speeds must be non-negative, "
+          "timeouts/range gap must be positive, and "
+          "bearings must be in (0, 180) degrees; update allowances must satisfy "
+          "base <= max <= max_euclidean");
       }
 
       // association algorithm selection for this channel (default: "bev")

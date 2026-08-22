@@ -233,9 +233,9 @@ struct InputChannel
   // reported extension is only nominal or otherwise untrusted.
   bool trust_position_as_center = false;
 
-  // Opt-in guard for camera-only depth ambiguity.  It is deliberately scoped to tracker birth:
-  // existing tracks continue through the normal prediction/update path and measurements are never
-  // replaced with predictions.  Defaults keep the upstream behavior unchanged for every channel.
+  // Opt-in guard for camera-only depth ambiguity.  Birth quarantine and associated-update
+  // innovation checking are independently switchable.  Defaults keep the upstream behavior
+  // unchanged for every channel.
   struct BirthGuard
   {
     bool enabled = false;
@@ -247,6 +247,24 @@ struct InputChannel
     double conflict_max_coast_age_sec = 0.8;
     double conflict_min_range_gap_m = 12.0;
     double conflict_max_bearing_deg = 2.0;
+
+    // An associated monocular-camera measurement can be the alternate intersection of the same
+    // image ray with a farther/nearer part of the track.  Association covariance can legitimately
+    // be broad enough to accept that mode, so this optional second gate limits only the unexplained
+    // radial innovation relative to the tracker's velocity-aware prediction.  The base allowance
+    // is the bounded camera/model-noise budget; deliberately do not grow it from monocular depth
+    // covariance, because that covariance is precisely what cannot distinguish the alternate mode.
+    struct UpdateGuard
+    {
+      bool enabled = false;
+      int min_measurements = 3;
+      double base_allowance_m = 0.75;
+      double max_innovation_speed_mps = 35.0;
+      double max_elapsed_sec = 0.15;
+      double max_allowance_m = 4.5;
+      double max_bearing_deg = 2.0;
+      double max_euclidean_innovation_m = 5.0;
+    } update_guard;
   } birth_guard;
 };
 
@@ -258,12 +276,26 @@ inline bool isValidBirthGuardConfig(const InputChannel::BirthGuard & config)
     std::isfinite(config.hypothesis_max_speed_mps) &&
     std::isfinite(config.conflict_max_coast_age_sec) &&
     std::isfinite(config.conflict_min_range_gap_m) &&
-    std::isfinite(config.conflict_max_bearing_deg);
+    std::isfinite(config.conflict_max_bearing_deg) &&
+    std::isfinite(config.update_guard.base_allowance_m) &&
+    std::isfinite(config.update_guard.max_innovation_speed_mps) &&
+    std::isfinite(config.update_guard.max_elapsed_sec) &&
+    std::isfinite(config.update_guard.max_allowance_m) &&
+    std::isfinite(config.update_guard.max_bearing_deg) &&
+    std::isfinite(config.update_guard.max_euclidean_innovation_m);
   return all_finite && config.min_confirmations >= 1 &&
          config.min_established_measurements >= 1 && config.hypothesis_timeout_sec > 0.0 &&
          config.hypothesis_match_distance_m >= 0.0 && config.hypothesis_max_speed_mps >= 0.0 &&
          config.conflict_max_coast_age_sec > 0.0 && config.conflict_min_range_gap_m > 0.0 &&
-         config.conflict_max_bearing_deg > 0.0 && config.conflict_max_bearing_deg < 180.0;
+         config.conflict_max_bearing_deg > 0.0 && config.conflict_max_bearing_deg < 180.0 &&
+         config.update_guard.min_measurements >= 3 &&
+         config.update_guard.base_allowance_m >= 0.0 &&
+         config.update_guard.max_innovation_speed_mps >= 0.0 &&
+         config.update_guard.max_elapsed_sec > 0.0 &&
+         config.update_guard.max_allowance_m >= config.update_guard.base_allowance_m &&
+         config.update_guard.max_bearing_deg > 0.0 &&
+         config.update_guard.max_bearing_deg < 180.0 &&
+         config.update_guard.max_euclidean_innovation_m >= config.update_guard.max_allowance_m;
 }
 
 struct ExistenceProbability

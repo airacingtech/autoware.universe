@@ -95,6 +95,53 @@
               "exclusiveMinimum": 0.0,
               "exclusiveMaximum": 180.0,
               "default": 2.0
+            },
+            "update_guard": {
+              "type": "object",
+              "description": "Optional associated-update gate for same-bearing camera depth aliases. For established tracks it compares radial measurement innovation with the velocity-aware tracker prediction. Allowed innovation is min(max_allowance_m, base_allowance_m + max_innovation_speed_mps * min(elapsed time since the last accepted measurement, max_elapsed_sec)). Before min_measurements, only the looser max_euclidean_innovation_m cap applies so real vehicle motion can bootstrap velocity. That Euclidean cap also prevents an arbitrarily large jump just outside max_bearing_deg. Monocular depth covariance is intentionally not an escape hatch because it cannot distinguish the alternate ray/mesh mode. A rejected association is consumed for that cycle, the tracker coasts, and no new UUID is spawned. A real second car exactly behind an associated track can therefore be delayed until association separates or the old track expires.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "min_measurements": {
+                  "type": "integer",
+                  "minimum": 3,
+                  "default": 3
+                },
+                "base_allowance_m": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "default": 0.75
+                },
+                "max_innovation_speed_mps": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "default": 35.0
+                },
+                "max_elapsed_sec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0.0,
+                  "default": 0.15
+                },
+                "max_allowance_m": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "default": 4.5
+                },
+                "max_bearing_deg": {
+                  "type": "number",
+                  "exclusiveMinimum": 0.0,
+                  "exclusiveMaximum": 180.0,
+                  "default": 2.0
+                },
+                "max_euclidean_innovation_m": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "default": 5.0
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
