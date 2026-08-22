@@ -110,6 +110,7 @@ if(BUILD_TESTING)
     test/test_tracker_overlap_manager.cpp
     test/test_experiment_qos.cpp
     test/test_birth_guard.cpp
+    test/test_input_manager.cpp
   )
   add_definitions(-D_SRC_RESOURCES_DIR_PATH="${PROJECT_SOURCE_DIR}/test/data/")
   ament_add_ros_isolated_gtest(test_multi_object_tracker ${test_files})
