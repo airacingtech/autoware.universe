@@ -83,6 +83,7 @@ private:
   struct UpdateGuardResult
   {
     bool reject{false};
+    bool preserve_existence{false};
     bool used_no_ego_fallback{false};
     bool invalid_input{false};
     double innovation_m{0.0};
@@ -109,6 +110,7 @@ private:
   uint64_t birth_guard_no_ego_withheld_count_{0};
   uint64_t birth_guard_nonfinite_rejected_count_{0};
   uint64_t update_guard_rejected_count_{0};
+  uint64_t update_guard_coasted_count_{0};
   uint64_t update_guard_no_ego_rejected_count_{0};
   uint64_t update_guard_invalid_rejected_count_{0};
   std::optional<geometry_msgs::msg::Pose> getEgoPose() const;

@@ -290,12 +290,12 @@ TEST_F(BirthGuardTest, WithholdsImpossibleSameBearingAssociatedUpdateWithoutSpaw
   EXPECT_EQ(tracker->getTotalMeasurementCount(), measurements_before);
   EXPECT_EQ(tracker->getNoMeasurementCount(), 1);
   EXPECT_EQ(tracker->getTotalNoMeasurementCount(), total_misses_before + 1);
-  EXPECT_FLOAT_EQ(tracker->getTotalExistenceProbability(), existence_before);
+  EXPECT_LT(tracker->getTotalExistenceProbability(), existence_before);
   const auto channel_existence_after = tracker->getExistenceProbabilityVector();
   ASSERT_EQ(channel_existence_after.size(), channel_existence_before.size());
   for (size_t i = 0; i < channel_existence_before.size(); ++i) {
     EXPECT_EQ(channel_existence_after[i].channel_index, channel_existence_before[i].channel_index);
-    EXPECT_FLOAT_EQ(
+    EXPECT_LT(
       channel_existence_after[i].existence_probability,
       channel_existence_before[i].existence_probability);
   }
@@ -312,6 +312,8 @@ TEST_F(BirthGuardTest, RejectedUpdatesKeepOnlyABoundedPredictionCoastAlive)
   const auto tracker = processor_->getListTracker().front();
   const auto last_valid_measurement = tracker->getLatestMeasurementTime();
   const float existence_before = tracker->getTotalExistenceProbability();
+  const auto channel_existence_before = tracker->getExistenceProbabilityVector();
+  const int total_misses_before = tracker->getTotalNoMeasurementCount();
 
   for (int i = 0; i < 19; ++i) {
     forceAssociatedUpdate(time, {20.0, 0.0});
@@ -324,6 +326,15 @@ TEST_F(BirthGuardTest, RejectedUpdatesKeepOnlyABoundedPredictionCoastAlive)
   }
 
   EXPECT_FLOAT_EQ(tracker->getTotalExistenceProbability(), existence_before);
+  EXPECT_EQ(tracker->getTotalNoMeasurementCount(), total_misses_before + 19);
+  const auto channel_existence_after = tracker->getExistenceProbabilityVector();
+  ASSERT_EQ(channel_existence_after.size(), channel_existence_before.size());
+  for (size_t i = 0; i < channel_existence_before.size(); ++i) {
+    EXPECT_EQ(channel_existence_after[i].channel_index, channel_existence_before[i].channel_index);
+    EXPECT_FLOAT_EQ(
+      channel_existence_after[i].existence_probability,
+      channel_existence_before[i].existence_probability);
+  }
   EXPECT_EQ(tracker->getLatestMeasurementTime(), last_valid_measurement);
 
   // Rejected observations never refresh the accepted-measurement timestamp, so the existing
