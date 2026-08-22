@@ -121,15 +121,9 @@ void TrackerProcessor::update(const types::AssociatedObjects & associated_object
         *tracker_itr, associated_object, time, channel_info.birth_guard.update_guard);
       if (update_guard_result.reject) {
         // Keep the association intact: spawn() will see measurement_to_tracker and cannot create a
-        // second UUID from the rejected alternate depth mode in this cycle. Preserve confidence
-        // only for a hard displacement-cap violation. A smaller radial rejection can be a real
-        // correction to a biased monocular track, so it follows ordinary decay and can reacquire.
-        if (update_guard_result.preserve_existence) {
-          (*tracker_itr)->coastAfterRejectedMeasurement();
-          ++update_guard_coasted_count_;
-        } else {
-          (*tracker_itr)->updateWithoutMeasurement(time);
-        }
+        // second UUID from the rejected alternate depth mode in this cycle.  Only the normal
+        // bounded no-measurement path is applied to the established tracker.
+        (*tracker_itr)->updateWithoutMeasurement(time);
         ++update_guard_rejected_count_;
         if (update_guard_result.used_no_ego_fallback) {
           ++update_guard_no_ego_rejected_count_;
@@ -218,7 +212,6 @@ TrackerProcessor::UpdateGuardResult TrackerProcessor::evaluateAssociatedUpdate(
     result.used_no_ego_fallback = !has_usable_ego_pose;
     result.innovation_m = euclidean_innovation;
     result.allowance_m = config.max_euclidean_innovation_m;
-    result.preserve_existence = true;
     result.reject = true;
     return result;
   }
@@ -492,7 +485,6 @@ void TrackerProcessor::logBirthGuardStats(const char * event, const uint channel
     logger_, *clock_, 1000,
     "Birth guard %s on channel %u: quarantined=%llu released=%llu expired=%llu "
     "no_ego_withheld=%llu nonfinite_rejected=%llu active=%zu update_rejected=%llu "
-    "update_coasted=%llu "
     "update_no_ego_rejected=%llu update_invalid_rejected=%llu",
     event, channel_index, static_cast<unsigned long long>(birth_guard_quarantined_count_),
     static_cast<unsigned long long>(birth_guard_released_count_),
@@ -500,7 +492,6 @@ void TrackerProcessor::logBirthGuardStats(const char * event, const uint channel
     static_cast<unsigned long long>(birth_guard_no_ego_withheld_count_),
     static_cast<unsigned long long>(birth_guard_nonfinite_rejected_count_),
     birth_hypotheses_.size(), static_cast<unsigned long long>(update_guard_rejected_count_),
-    static_cast<unsigned long long>(update_guard_coasted_count_),
     static_cast<unsigned long long>(update_guard_no_ego_rejected_count_),
     static_cast<unsigned long long>(update_guard_invalid_rejected_count_));
 }

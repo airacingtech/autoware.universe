@@ -94,7 +94,6 @@ public:
     const types::DynamicObject & object, const rclcpp::Time & measurement_time,
     const types::InputChannel & channel_info, bool has_significant_shape_change = false);
   bool updateWithoutMeasurement(const rclcpp::Time & now);
-  bool coastAfterRejectedMeasurement();
   void updateClassification(const std::vector<classes::Classification> & classification);
 
   // Returns the shape model that owns this tracker's extension (single source of truth).
