@@ -201,11 +201,17 @@ bool Tracker::updateWithMeasurement(
   }
   setOrientationAvailability(kinematics_.orientation_availability);
 
-  // Select update path: NORMAL / TRY_EXTENSION / CONDITIONED
+  // Select update path: NORMAL / CENTER_POSITION / TRY_EXTENSION / CONDITIONED
   const UpdatePath path =
-    selectUpdatePath(channel_info.trust_extension, has_significant_shape_change);
+    selectUpdatePath(channel_info, has_significant_shape_change);
 
-  if (path == UpdatePath::NORMAL) {
+  if (path == UpdatePath::CENTER_POSITION) {
+    // pose.position is a full-object center, but extension is deliberately
+    // untrusted.  Update the kinematics without allowing this channel to reset
+    // another sensor's shape-filter history or extension-trust state.
+    measure(object, measurement_time, channel_info);
+
+  } else if (path == UpdatePath::NORMAL) {
     unstable_shape_filter_.processNormalMeasurement(object);
     measure(object, measurement_time, channel_info);
     trust_extension_ = object.trust_extension;

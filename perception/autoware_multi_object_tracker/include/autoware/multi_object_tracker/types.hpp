@@ -228,6 +228,9 @@ struct InputChannel
   bool trust_classification = true;                        // trust object classification
   bool trust_orientation = true;                           // trust object orientation(yaw)
   AssociationType associator_type = AssociationType::BEV;  // which associator to use
+  // True when pose.position is the full object's geometric center even if the
+  // reported extension is only nominal or otherwise untrusted.
+  bool trust_position_as_center = false;
 };
 
 struct ExistenceProbability

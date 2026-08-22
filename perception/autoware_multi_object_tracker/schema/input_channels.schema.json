@@ -39,6 +39,11 @@
               "type": "boolean",
               "description": "Indicates if the input channel can trust the object orientation.",
               "default": true
+            },
+            "can_trust_position_as_center": {
+              "type": "boolean",
+              "description": "Indicates that pose.position is the full object's geometric center, independently of extension and orientation trust.",
+              "default": false
             }
           }
         },

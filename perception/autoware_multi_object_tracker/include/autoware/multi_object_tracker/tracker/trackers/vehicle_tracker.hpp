@@ -86,9 +86,12 @@ public:
 
   // Clusters (trust_extension=false) have unreliable bbox orientation — always use conditioned.
   UpdatePath selectUpdatePath(
-    bool trust_extension, bool has_significant_shape_change) const override
+    const types::InputChannel & channel_info, bool has_significant_shape_change) const override
   {
-    if (!trust_extension) return UpdatePath::CONDITIONED;
+    if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
+      return UpdatePath::CENTER_POSITION;
+    }
+    if (!channel_info.trust_extension) return UpdatePath::CONDITIONED;
     return has_significant_shape_change ? UpdatePath::TRY_EXTENSION : UpdatePath::NORMAL;
   }
 };

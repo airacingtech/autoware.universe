@@ -214,6 +214,7 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
         input_channel_config.trust_extension = false;
         input_channel_config.trust_classification = false;
         input_channel_config.trust_orientation = false;
+        input_channel_config.trust_position_as_center = false;
         input_channel_config.long_name = "none";
         input_channel_config.short_name = "none";
         params_.input_channels_config.push_back(input_channel_config);
@@ -242,6 +243,9 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       // trust object orientation(yaw)
       input_channel_config.trust_orientation =
         declare_parameter<bool>(input_channel_config_name + ".flags.can_trust_orientation", true);
+
+      input_channel_config.trust_position_as_center = declare_parameter<bool>(
+        input_channel_config_name + ".flags.can_trust_position_as_center", false);
 
       // association algorithm selection for this channel (default: "bev")
       {
