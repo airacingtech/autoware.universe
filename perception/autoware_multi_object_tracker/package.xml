@@ -23,6 +23,7 @@
   <depend>eigen</depend>
   <depend>mussp</depend>
   <depend>nav_msgs</depend>
+  <depend>rcl_interfaces</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>rosbag2_cpp</depend>

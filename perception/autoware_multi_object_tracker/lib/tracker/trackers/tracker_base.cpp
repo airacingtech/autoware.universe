@@ -58,6 +58,7 @@ Tracker::Tracker(const rclcpp::Time & time, const types::DynamicObject & detecte
   total_no_measurement_count_(0),
   total_measurement_count_(1),
   last_update_with_measurement_time_(time),
+  last_existence_probability_update_time_(time),
   channel_index_(detected_object.channel_index),
   existence_probability_(detected_object.existence_probability),
   kinematics_(detected_object.kinematics),
@@ -143,8 +144,8 @@ bool Tracker::updateWithMeasurement(
     ++total_measurement_count_;
 
     // existence probability on each channel
-    const float delta_time =
-      std::abs((measurement_time - last_update_with_measurement_time_).seconds());
+    const float delta_time = static_cast<float>(
+      std::max(0.0, (measurement_time - last_existence_probability_update_time_).seconds()));
     constexpr float probability_true_detection = 0.9;
     constexpr float probability_false_detection = 0.2;
 
@@ -177,6 +178,13 @@ bool Tracker::updateWithMeasurement(
     total_existence_probability_ = updateProbability(
       total_existence_probability_, object.existence_probability * probability_true_detection,
       probability_false_detection);
+
+    // Existence probabilities may already have been decayed by prediction-only updates since the
+    // last accepted measurement. Advance this independent clock so a later measurement does not
+    // apply the same elapsed interval to the other channels a second time.
+    if (measurement_time > last_existence_probability_update_time_) {
+      last_existence_probability_update_time_ = measurement_time;
+    }
   }
 
   last_update_with_measurement_time_ = measurement_time;
@@ -201,11 +209,17 @@ bool Tracker::updateWithMeasurement(
   }
   setOrientationAvailability(kinematics_.orientation_availability);
 
-  // Select update path: NORMAL / TRY_EXTENSION / CONDITIONED
+  // Select update path: NORMAL / CENTER_POSITION / TRY_EXTENSION / CONDITIONED
   const UpdatePath path =
-    selectUpdatePath(channel_info.trust_extension, has_significant_shape_change);
+    selectUpdatePath(channel_info, has_significant_shape_change);
 
-  if (path == UpdatePath::NORMAL) {
+  if (path == UpdatePath::CENTER_POSITION) {
+    // pose.position is a full-object center, but extension is deliberately
+    // untrusted.  Update the kinematics without allowing this channel to reset
+    // another sensor's shape-filter history or extension-trust state.
+    measure(object, measurement_time, channel_info);
+
+  } else if (path == UpdatePath::NORMAL) {
     unstable_shape_filter_.processNormalMeasurement(object);
     measure(object, measurement_time, channel_info);
     trust_extension_ = object.trust_extension;
@@ -245,11 +259,15 @@ bool Tracker::updateWithoutMeasurement(const rclcpp::Time & timestamp)
   ++total_no_measurement_count_;
   {
     // decay existence probability
-    float const delta_time = (timestamp - last_update_with_measurement_time_).seconds();
+    const float delta_time = static_cast<float>(
+      std::max(0.0, (timestamp - last_existence_probability_update_time_).seconds()));
     for (auto & prob : existence_probabilities_) {
       prob.existence_probability = decayProbability(prob.existence_probability, delta_time);
     }
     total_existence_probability_ = decayProbability(total_existence_probability_, delta_time);
+    if (timestamp > last_existence_probability_update_time_) {
+      last_existence_probability_update_time_ = timestamp;
+    }
   }
 
   return true;

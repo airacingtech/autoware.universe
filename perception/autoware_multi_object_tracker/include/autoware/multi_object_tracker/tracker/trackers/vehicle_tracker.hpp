@@ -43,6 +43,14 @@ private:
   // Consumed by setObjectShape() so UnstableShapeFilter commits the new length correctly.
   BicycleMotionModel::LengthUpdateAnchor shape_update_anchor_;
 
+  // A center-position camera supplies a nominal, fixed vehicle footprint rather
+  // than a newly observed extension on every frame.  Keep that physical length
+  // separate from the bicycle model's two endpoint states: those endpoints can
+  // otherwise drift apart during prediction even though the actual car cannot
+  // grow or shrink.
+  double nominal_length_{0.0};
+  bool lock_nominal_length_{false};
+
   // EKF kinematic update — selects update variant based on data availability.
   bool updateKinematics(
     const types::DynamicObject & object, const types::InputChannel & channel_info);
@@ -84,11 +92,16 @@ public:
   // mergeFootprintFrom() is handled by the base via getShapeModel().mergeFrom().
   void setObjectShape(const autoware_perception_msgs::msg::Shape & shape) override;
 
-  // Clusters (trust_extension=false) have unreliable bbox orientation — always use conditioned.
+  // A source that provides a real object center uses the ordinary center-pose
+  // update even when its dimensions are nominal.  Partial clusters retain the
+  // legacy edge-conditioned path.
   UpdatePath selectUpdatePath(
-    bool trust_extension, bool has_significant_shape_change) const override
+    const types::InputChannel & channel_info, bool has_significant_shape_change) const override
   {
-    if (!trust_extension) return UpdatePath::CONDITIONED;
+    if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
+      return UpdatePath::CENTER_POSITION;
+    }
+    if (!channel_info.trust_extension) return UpdatePath::CONDITIONED;
     return has_significant_shape_change ? UpdatePath::TRY_EXTENSION : UpdatePath::NORMAL;
   }
 };

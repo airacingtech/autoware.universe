@@ -211,10 +211,11 @@ void InputStream::getObjectsOlderThan(
     }
   }
 
-  // remove objects older than 'object_latest_time'
+  // Remove every object exported above, including one exactly on the inclusive cutoff.  Keeping
+  // the boundary item would make the next callback process the same measurement a second time.
   while (!objects_que_.empty()) {
     const rclcpp::Time object_time = objects_que_.front().getTimestamp();
-    if (object_time < object_latest_time) {
+    if (object_time <= object_latest_time) {
       objects_que_.pop_front();
     } else {
       break;

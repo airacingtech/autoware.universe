@@ -96,6 +96,7 @@ VehicleTracker::VehicleTracker(
           object.shape.dimensions.x, object_model_.size_limit.length_min,
           object_model_.size_limit.length_max)
       : object_model_.init_size.length;
+  nominal_length_ = initial_length;
 
   // Set motion model parameters
   motion_model_.setMotionParams(
@@ -145,7 +146,17 @@ VehicleTracker::VehicleTracker(
 
 bool VehicleTracker::predict(const rclcpp::Time & time)
 {
-  return motion_model_.predictState(time);
+  const bool predicted = motion_model_.predictState(time);
+  if (predicted && lock_nominal_length_) {
+    // Prediction evolves the two bicycle endpoints independently.  Restore
+    // their physical separation about the same weighted body center so a
+    // detection gap cannot turn state uncertainty into a 10--20 m car.
+    const bool length_restored = motion_model_.updateStateLength(
+      nominal_length_, BicycleMotionModel::LengthUpdateAnchor::CENTER);
+    removeCache();
+    return length_restored;
+  }
+  return predicted;
 }
 
 bool VehicleTracker::updateKinematics(
@@ -243,18 +254,30 @@ bool VehicleTracker::measure(
 
   const bool is_bbox = (corrected.shape.type == autoware_perception_msgs::msg::Shape::BOUNDING_BOX);
   updateKinematics(corrected, channel_info);
+  if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
+    lock_nominal_length_ = true;
+    // The dimensions on this channel are nominal metadata, not a per-frame
+    // shape observation.  Preserve the constructor/trusted-shape length while
+    // retaining the just-updated center position.
+    motion_model_.updateStateLength(
+      nominal_length_, BicycleMotionModel::LengthUpdateAnchor::CENTER);
+  }
   if (channel_info.trust_extension && is_bbox) {
     shape_model_.updateShape(corrected);
   }
 
-  // Get current tracker pose for footprint transform
-  geometry_msgs::msg::Pose tracker_pose;
-  std::array<double, 36> dummy_cov{};
-  geometry_msgs::msg::Twist dummy_twist;
-  const bool has_pose =
-    motion_model_.getPredictedState(time, tracker_pose, dummy_cov, dummy_twist, dummy_cov);
-  shape_model_.updateFootprint(
-    corrected, time, has_pose ? std::make_optional(tracker_pose) : std::nullopt);
+  // A footprint is extension data too.  A center-only channel must not mutate
+  // stored geometry merely because a future producer happens to populate the
+  // footprint field while declaring its extension untrusted.
+  if (channel_info.trust_extension) {
+    geometry_msgs::msg::Pose tracker_pose;
+    std::array<double, 36> dummy_cov{};
+    geometry_msgs::msg::Twist dummy_twist;
+    const bool has_pose =
+      motion_model_.getPredictedState(time, tracker_pose, dummy_cov, dummy_twist, dummy_cov);
+    shape_model_.updateFootprint(
+      corrected, time, has_pose ? std::make_optional(tracker_pose) : std::nullopt);
+  }
 
   shape_update_anchor_ = BicycleMotionModel::LengthUpdateAnchor::CENTER;
   removeCache();
@@ -360,6 +383,7 @@ void VehicleTracker::setObjectShape(const autoware_perception_msgs::msg::Shape &
 {
   const auto new_len = shape_model_.setShape(shape, getLatestMeasurementTime());
   if (new_len) {
+    nominal_length_ = *new_len;
     motion_model_.updateStateLength(*new_len, shape_update_anchor_);
   }
   shape_update_anchor_ = BicycleMotionModel::LengthUpdateAnchor::CENTER;
