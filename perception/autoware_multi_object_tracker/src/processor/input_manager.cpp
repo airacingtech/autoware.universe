@@ -74,9 +74,12 @@ std::optional<types::DynamicObjectList> InputStream::processMessage(
 
   types::DynamicObjectList dynamic_objects = types::toDynamicObjectList(objects, channel_.index);
 
-  // Set trust_extension information from channel configuration
+  // Preserve the channel's geometry contract on each converted object.  The
+  // tracker constructor receives the object before any later measurement call,
+  // so birth-time policy cannot be reconstructed from trust_extension alone.
   for (auto & object : dynamic_objects.objects) {
     object.trust_extension = channel_.trust_extension;
+    object.trust_position_as_center = channel_.trust_position_as_center;
   }
 
   // Model the object uncertainty only if it is not available
@@ -211,10 +214,11 @@ void InputStream::getObjectsOlderThan(
     }
   }
 
-  // remove objects older than 'object_latest_time'
+  // Remove every object exported above, including one exactly on the inclusive cutoff.  Keeping
+  // the boundary item would make the next callback process the same measurement a second time.
   while (!objects_que_.empty()) {
     const rclcpp::Time object_time = objects_que_.front().getTimestamp();
-    if (object_time < object_latest_time) {
+    if (object_time <= object_latest_time) {
       objects_que_.pop_front();
     } else {
       break;

@@ -134,6 +134,13 @@
           "description": "Timer frequency to output with delay compensation.",
           "default": 10.0
         },
+        "detection_subscription_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "KEEP_LAST history depth for each detected-object subscription.",
+          "default": 1
+        },
         "world_frame_id": {
           "type": "string",
           "description": "Object kinematics definition frame.",

@@ -43,7 +43,7 @@
 namespace autoware::multi_object_tracker
 {
 
-enum class UpdatePath { NORMAL, TRY_EXTENSION, CONDITIONED };
+enum class UpdatePath { NORMAL, CENTER_POSITION, TRY_EXTENSION, CONDITIONED };
 
 class Tracker
 {
@@ -53,6 +53,7 @@ private:
   int total_no_measurement_count_;
   int total_measurement_count_;
   rclcpp::Time last_update_with_measurement_time_;
+  rclcpp::Time last_existence_probability_update_time_;
   std::vector<types::ExistenceProbability> existence_probabilities_;
   float total_existence_probability_;
   std::vector<classes::Classification> classification_;
@@ -250,11 +251,14 @@ protected:
 
   // Selects the update path for a given measurement.
   // NORMAL      — standard Kalman update (with optional shape-filter history accumulation)
+  // CENTER_POSITION — consume only the center-pose kinematics; do not mutate extension trust or
+  //                   shape-filter history
   // TRY_EXTENSION — attempt extension update via shape filter; fall back to CONDITIONED if unstable
   // CONDITIONED — edge-aligned / weak conditioned update; shape management is bypassed entirely
-  virtual UpdatePath selectUpdatePath(bool trust_extension, bool has_significant_shape_change) const
+  virtual UpdatePath selectUpdatePath(
+    const types::InputChannel & channel_info, bool has_significant_shape_change) const
   {
-    (void)trust_extension;
+    (void)channel_info;
     (void)has_significant_shape_change;
     return UpdatePath::NORMAL;
   }

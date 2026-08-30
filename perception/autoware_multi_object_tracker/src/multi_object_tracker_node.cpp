@@ -16,8 +16,13 @@
 
 #include "multi_object_tracker_node.hpp"
 
+#include "detection_subscription_qos.hpp"
+
 #include "autoware/multi_object_tracker/types.hpp"
 #include "autoware/multi_object_tracker/uncertainty/uncertainty_processor.hpp"
+
+#include <rcl_interfaces/msg/integer_range.hpp>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
 
 #include <algorithm>
 #include <array>
@@ -48,6 +53,18 @@ TrackerType parseTrackerType(const std::string & name, const std::string & param
       "'. Strict string match is required.");
   }
   return *tracker_type;
+}
+
+int validatedDetectionSubscriptionDepth(const int requested, const rclcpp::Logger & logger)
+{
+  if (!input_qos::isValidDepth(requested)) {
+    const std::string message =
+      "detection_subscription_depth " + std::to_string(requested) + " is outside [" +
+      std::to_string(input_qos::kDepthMin) + ", " + std::to_string(input_qos::kDepthMax) + "]";
+    RCLCPP_ERROR(logger, "%s", message.c_str());
+    throw std::invalid_argument(message);
+  }
+  return requested;
 }
 }  // namespace
 
@@ -95,6 +112,7 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
         input_channel_config.trust_extension = false;
         input_channel_config.trust_classification = false;
         input_channel_config.trust_orientation = false;
+        input_channel_config.trust_position_as_center = false;
         input_channel_config.long_name = "none";
         input_channel_config.short_name = "none";
         params_.input_channels_config.push_back(input_channel_config);
@@ -123,6 +141,70 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       // trust object orientation(yaw)
       input_channel_config.trust_orientation =
         declare_parameter<bool>(input_channel_config_name + ".flags.can_trust_orientation", true);
+
+      // Whether pose.position is a trustworthy full-object center.  Keep this
+      // separate from extension trust: a detector may emit a well-defined
+      // center with nominal dimensions and no measured yaw.
+      input_channel_config.trust_position_as_center = declare_parameter<bool>(
+        input_channel_config_name + ".flags.can_trust_position_as_center", false);
+
+      // Camera depth ambiguity birth guard.  This is opt-in per channel; keeping `enabled` absent
+      // or false preserves the shipped spawn behavior for generic, LiDAR, and radar inputs.
+      auto & birth_guard = input_channel_config.birth_guard;
+      const std::string birth_guard_name = input_channel_config_name + ".birth_guard.";
+      birth_guard.enabled =
+        declare_parameter<bool>(birth_guard_name + "enabled", birth_guard.enabled);
+      birth_guard.single_opponent_mode = declare_parameter<bool>(
+        birth_guard_name + "single_opponent_mode", birth_guard.single_opponent_mode);
+      birth_guard.min_confirmations = declare_parameter<int>(
+        birth_guard_name + "min_confirmations", birth_guard.min_confirmations);
+      birth_guard.min_established_measurements = declare_parameter<int>(
+        birth_guard_name + "min_established_measurements",
+        birth_guard.min_established_measurements);
+      birth_guard.hypothesis_timeout_sec = declare_parameter<double>(
+        birth_guard_name + "hypothesis_timeout_sec", birth_guard.hypothesis_timeout_sec);
+      birth_guard.hypothesis_match_distance_m = declare_parameter<double>(
+        birth_guard_name + "hypothesis_match_distance_m",
+        birth_guard.hypothesis_match_distance_m);
+      birth_guard.hypothesis_max_speed_mps = declare_parameter<double>(
+        birth_guard_name + "hypothesis_max_speed_mps", birth_guard.hypothesis_max_speed_mps);
+      birth_guard.conflict_max_coast_age_sec = declare_parameter<double>(
+        birth_guard_name + "conflict_max_coast_age_sec",
+        birth_guard.conflict_max_coast_age_sec);
+      birth_guard.conflict_min_range_gap_m = declare_parameter<double>(
+        birth_guard_name + "conflict_min_range_gap_m", birth_guard.conflict_min_range_gap_m);
+      birth_guard.conflict_max_bearing_deg = declare_parameter<double>(
+        birth_guard_name + "conflict_max_bearing_deg", birth_guard.conflict_max_bearing_deg);
+
+      auto & update_guard = birth_guard.update_guard;
+      const std::string update_guard_name = birth_guard_name + "update_guard.";
+      update_guard.enabled =
+        declare_parameter<bool>(update_guard_name + "enabled", update_guard.enabled);
+      update_guard.min_measurements = declare_parameter<int>(
+        update_guard_name + "min_measurements", update_guard.min_measurements);
+      update_guard.base_allowance_m = declare_parameter<double>(
+        update_guard_name + "base_allowance_m", update_guard.base_allowance_m);
+      update_guard.max_innovation_speed_mps = declare_parameter<double>(
+        update_guard_name + "max_innovation_speed_mps", update_guard.max_innovation_speed_mps);
+      update_guard.max_elapsed_sec = declare_parameter<double>(
+        update_guard_name + "max_elapsed_sec", update_guard.max_elapsed_sec);
+      update_guard.max_allowance_m = declare_parameter<double>(
+        update_guard_name + "max_allowance_m", update_guard.max_allowance_m);
+      update_guard.max_bearing_deg = declare_parameter<double>(
+        update_guard_name + "max_bearing_deg", update_guard.max_bearing_deg);
+      update_guard.max_euclidean_innovation_m = declare_parameter<double>(
+        update_guard_name + "max_euclidean_innovation_m",
+        update_guard.max_euclidean_innovation_m);
+
+      if (!types::isValidBirthGuardConfig(birth_guard)) {
+        throw std::invalid_argument(
+          birth_guard_name +
+          " has invalid values: every floating-point value must be finite, birth counts must be "
+          ">= 1, update min_measurements must be >= 3, distances/speeds must be non-negative, "
+          "timeouts/range gap must be positive, and "
+          "bearings must be in (0, 180) degrees; update allowances must satisfy "
+          "base <= max <= max_euclidean");
+      }
 
       // association algorithm selection for this channel (default: "bev")
       {
@@ -258,6 +340,21 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 
   ////// Create subscriptions and publishers
   // subscriptions
+  rcl_interfaces::msg::ParameterDescriptor depth_descriptor;
+  depth_descriptor.description =
+    "KEEP_LAST history depth for each detected-object subscription";
+  rcl_interfaces::msg::IntegerRange depth_range;
+  depth_range.from_value = input_qos::kDepthMin;
+  depth_range.to_value = input_qos::kDepthMax;
+  depth_range.step = 1;
+  depth_descriptor.integer_range.push_back(depth_range);
+  const int detection_subscription_depth = validatedDetectionSubscriptionDepth(
+    declare_parameter<int>(
+      "detection_subscription_depth", input_qos::kDepthDefault, depth_descriptor),
+    get_logger());
+  RCLCPP_INFO(
+    get_logger(), "detection subscription KEEP_LAST depth = %d", detection_subscription_depth);
+
   sub_objects_array_.resize(params_.input_channels_config.size());
   for (const auto & input_channel : params_.input_channels_config) {
     if (!input_channel.is_enabled) {
@@ -271,7 +368,7 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
 
     sub_objects_array_.at(index) =
       create_subscription<autoware_perception_msgs::msg::DetectedObjects>(
-        input_channel_topic, rclcpp::QoS{1},
+        input_channel_topic, input_qos::detectionQos(detection_subscription_depth),
         [this,
          index](AUTOWARE_MESSAGE_CONST_SHARED_PTR(autoware_perception_msgs::msg::DetectedObjects)
                   msg) { this->onMeasurement(index, std::move(msg)); });

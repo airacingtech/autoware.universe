@@ -36,6 +36,7 @@
 #include <boost/optional.hpp>
 
 #include <array>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -228,7 +229,81 @@ struct InputChannel
   bool trust_classification = true;                        // trust object classification
   bool trust_orientation = true;                           // trust object orientation(yaw)
   AssociationType associator_type = AssociationType::BEV;  // which associator to use
+  // True when pose.position is the full object's geometric center even if the
+  // reported extension is only nominal or otherwise untrusted.  This is
+  // deliberately independent of trust_extension: association/shape handling
+  // may stay conservative while the kinematic filter consumes a valid center.
+  bool trust_position_as_center = false;
+
+  // Opt-in guard for camera-only depth ambiguity.  Birth quarantine and associated-update
+  // innovation checking are independently switchable.  Defaults keep the upstream behavior
+  // unchanged for every channel.
+  struct BirthGuard
+  {
+    bool enabled = false;
+    // A camera-only race policy for known 1v1 operation.  While a live tracker with the same
+    // semantic label exists, every unmatched measurement remains a birth hypothesis regardless
+    // of bearing.  This prevents a temporally coherent false reprojection from becoming a second
+    // opponent UUID.  Keep false by default so generic multi-object channels are unchanged.
+    bool single_opponent_mode = false;
+    int min_confirmations = 3;
+    int min_established_measurements = 2;
+    double hypothesis_timeout_sec = 0.35;
+    double hypothesis_match_distance_m = 3.0;
+    double hypothesis_max_speed_mps = 100.0;
+    double conflict_max_coast_age_sec = 0.8;
+    double conflict_min_range_gap_m = 12.0;
+    double conflict_max_bearing_deg = 2.0;
+
+    // An associated monocular-camera measurement can be the alternate intersection of the same
+    // image ray with a farther/nearer part of the track.  Association covariance can legitimately
+    // be broad enough to accept that mode, so this optional second gate limits only the unexplained
+    // radial innovation relative to the tracker's velocity-aware prediction.  The base allowance
+    // is the bounded camera/model-noise budget; deliberately do not grow it from monocular depth
+    // covariance, because that covariance is precisely what cannot distinguish the alternate mode.
+    struct UpdateGuard
+    {
+      bool enabled = false;
+      int min_measurements = 3;
+      double base_allowance_m = 0.75;
+      double max_innovation_speed_mps = 35.0;
+      double max_elapsed_sec = 0.15;
+      double max_allowance_m = 4.5;
+      double max_bearing_deg = 2.0;
+      double max_euclidean_innovation_m = 5.0;
+    } update_guard;
+  } birth_guard;
 };
+
+inline bool isValidBirthGuardConfig(const InputChannel::BirthGuard & config)
+{
+  const bool all_finite =
+    std::isfinite(config.hypothesis_timeout_sec) &&
+    std::isfinite(config.hypothesis_match_distance_m) &&
+    std::isfinite(config.hypothesis_max_speed_mps) &&
+    std::isfinite(config.conflict_max_coast_age_sec) &&
+    std::isfinite(config.conflict_min_range_gap_m) &&
+    std::isfinite(config.conflict_max_bearing_deg) &&
+    std::isfinite(config.update_guard.base_allowance_m) &&
+    std::isfinite(config.update_guard.max_innovation_speed_mps) &&
+    std::isfinite(config.update_guard.max_elapsed_sec) &&
+    std::isfinite(config.update_guard.max_allowance_m) &&
+    std::isfinite(config.update_guard.max_bearing_deg) &&
+    std::isfinite(config.update_guard.max_euclidean_innovation_m);
+  return all_finite && config.min_confirmations >= 1 &&
+         config.min_established_measurements >= 1 && config.hypothesis_timeout_sec > 0.0 &&
+         config.hypothesis_match_distance_m >= 0.0 && config.hypothesis_max_speed_mps >= 0.0 &&
+         config.conflict_max_coast_age_sec > 0.0 && config.conflict_min_range_gap_m > 0.0 &&
+         config.conflict_max_bearing_deg > 0.0 && config.conflict_max_bearing_deg < 180.0 &&
+         config.update_guard.min_measurements >= 3 &&
+         config.update_guard.base_allowance_m >= 0.0 &&
+         config.update_guard.max_innovation_speed_mps >= 0.0 &&
+         config.update_guard.max_elapsed_sec > 0.0 &&
+         config.update_guard.max_allowance_m >= config.update_guard.base_allowance_m &&
+         config.update_guard.max_bearing_deg > 0.0 &&
+         config.update_guard.max_bearing_deg < 180.0 &&
+         config.update_guard.max_euclidean_innovation_m >= config.update_guard.max_allowance_m;
+}
 
 struct ExistenceProbability
 {
@@ -278,6 +353,10 @@ struct DynamicObject
   // object extension (size and shape)
   autoware_perception_msgs::msg::Shape shape;
   bool trust_extension;
+  // Preserve the input-channel center-position contract through conversion,
+  // uncertainty modelling, and frame transformation so a tracker born from a
+  // center-only camera measurement can apply that policy immediately.
+  bool trust_position_as_center{false};
   double area;
 };
 

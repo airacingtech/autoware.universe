@@ -99,11 +99,15 @@ public:
 
   virtual ~MultipleVehicleTracker() {}
 
-  // Same policy as VehicleTracker: bicycle model owns shape; clusters use conditioned update.
+  // Same policy as VehicleTracker: a trustworthy object center is independent
+  // of extension trust; partial clusters use conditioned edge updates.
   UpdatePath selectUpdatePath(
-    bool trust_extension, bool has_significant_shape_change) const override
+    const types::InputChannel & channel_info, bool has_significant_shape_change) const override
   {
-    if (!trust_extension) return UpdatePath::CONDITIONED;
+    if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
+      return UpdatePath::CENTER_POSITION;
+    }
+    if (!channel_info.trust_extension) return UpdatePath::CONDITIONED;
     return has_significant_shape_change ? UpdatePath::TRY_EXTENSION : UpdatePath::NORMAL;
   }
 };
