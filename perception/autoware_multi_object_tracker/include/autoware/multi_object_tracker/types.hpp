@@ -241,6 +241,11 @@ struct InputChannel
   struct BirthGuard
   {
     bool enabled = false;
+    // A camera-only race policy for known 1v1 operation.  While a live tracker with the same
+    // semantic label exists, every unmatched measurement remains a birth hypothesis regardless
+    // of bearing.  This prevents a temporally coherent false reprojection from becoming a second
+    // opponent UUID.  Keep false by default so generic multi-object channels are unchanged.
+    bool single_opponent_mode = false;
     int min_confirmations = 3;
     int min_established_measurements = 2;
     double hypothesis_timeout_sec = 0.35;

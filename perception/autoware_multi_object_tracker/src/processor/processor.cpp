@@ -318,8 +318,16 @@ void TrackerProcessor::spawn(const types::AssociatedObjects & associated_objects
       ++birth_guard_no_ego_withheld_count_;
       logBirthGuardStats("withheld_no_ego", new_object.channel_index);
     }
+    const auto measurement_label = classes::getHighestProbLabel(new_object.classification);
+    const bool conflicts_with_live_opponent =
+      channel_config.birth_guard.single_opponent_mode &&
+      std::any_of(
+        list_tracker_.cbegin(), list_tracker_.cend(),
+        [measurement_label](const auto & tracker) {
+          return tracker->getHighestProbLabel() == measurement_label;
+        });
     const bool has_conflict =
-      !has_usable_ego_pose ||
+      !has_usable_ego_pose || conflicts_with_live_opponent ||
       conflictsWithCoastingTracker(new_object, time, channel_config.birth_guard);
     auto hypothesis = findBirthHypothesis(new_object, time, channel_config.birth_guard);
 
@@ -339,8 +347,8 @@ void TrackerProcessor::spawn(const types::AssociatedObjects & associated_objects
       logBirthGuardStats("quarantined", new_object.channel_index);
       RCLCPP_DEBUG(
         logger_,
-        "Quarantined unmatched %s birth at (%.2f, %.2f): farther same-bearing measurement "
-        "conflicts with a coasting established tracker",
+        "Quarantined unmatched %s birth at (%.2f, %.2f): measurement conflicts with the "
+        "configured camera birth policy",
         classes::toString(classes::getHighestProbLabel(new_object.classification)).c_str(),
         new_object.pose.position.x, new_object.pose.position.y);
       continue;

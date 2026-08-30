@@ -263,6 +263,56 @@ TEST_F(BirthGuardTest, DoesNotBlockASecondCarWhenEstablishedTrackerWasObserved)
   EXPECT_EQ(processor_->getListTracker().size(), 2U);
 }
 
+TEST_F(BirthGuardTest, SingleOpponentModeBlocksOppositeBearingBirthWhileTrackerWasObserved)
+{
+  channels_.front().birth_guard.single_opponent_mode = true;
+  resetProcessor();
+  auto time = baseTime();
+  establishNearTracker(time);
+
+  // This is the failure shape seen in the rear camera replay: the valid opponent continues to
+  // update while an unrelated, geometrically smooth false branch appears at another bearing.
+  // Generic same-ray birth protection intentionally allows it, but known 1v1 operation must not.
+  for (int i = 0; i < 6; ++i) {
+    process(time, {{10.0, 0.0}, {0.0, -35.0}});
+    time += rclcpp::Duration(50ms);
+  }
+
+  EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
+TEST_F(BirthGuardTest, SingleOpponentModeAllowsOnlyOneInitialTrackerPerMessage)
+{
+  channels_.front().birth_guard.single_opponent_mode = true;
+  resetProcessor();
+  const auto time = baseTime();
+
+  process(time, {{10.0, 0.0}, {0.0, -35.0}});
+
+  EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
+TEST_F(BirthGuardTest, SingleOpponentModeReleasesConfirmedReplacementAfterIncumbentExpires)
+{
+  channels_.front().birth_guard.single_opponent_mode = true;
+  resetProcessor();
+  auto time = baseTime();
+  establishNearTracker(time);
+
+  // Keep the replacement hypothesis coherent while the incumbent follows its normal bounded
+  // one-second coast.  It may be released only after prune() removes the incumbent.
+  for (int i = 0; i < 24; ++i) {
+    process(time, {{0.0, -35.0}});
+    time += rclcpp::Duration(50ms);
+  }
+
+  ASSERT_EQ(processor_->getListTracker().size(), 1U);
+  mot::types::DynamicObject replacement;
+  ASSERT_TRUE(processor_->getListTracker().front()->getTrackedObject(time, replacement, false));
+  EXPECT_NEAR(replacement.pose.position.x, 0.0, 1e-6);
+  EXPECT_NEAR(replacement.pose.position.y, -35.0, 1e-6);
+}
+
 TEST_F(BirthGuardTest, ReleasesConfirmedHypothesisAfterCoastConflictClears)
 {
   auto time = baseTime();

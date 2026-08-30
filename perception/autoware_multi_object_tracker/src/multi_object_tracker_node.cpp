@@ -154,6 +154,8 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       const std::string birth_guard_name = input_channel_config_name + ".birth_guard.";
       birth_guard.enabled =
         declare_parameter<bool>(birth_guard_name + "enabled", birth_guard.enabled);
+      birth_guard.single_opponent_mode = declare_parameter<bool>(
+        birth_guard_name + "single_opponent_mode", birth_guard.single_opponent_mode);
       birth_guard.min_confirmations = declare_parameter<int>(
         birth_guard_name + "min_confirmations", birth_guard.min_confirmations);
       birth_guard.min_established_measurements = declare_parameter<int>(
