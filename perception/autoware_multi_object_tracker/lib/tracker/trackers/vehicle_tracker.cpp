@@ -97,6 +97,7 @@ VehicleTracker::VehicleTracker(
           object_model_.size_limit.length_max)
       : object_model_.init_size.length;
   nominal_length_ = initial_length;
+  lock_nominal_length_ = object.trust_position_as_center && !object.trust_extension;
 
   // Set motion model parameters
   motion_model_.setMotionParams(
@@ -253,7 +254,7 @@ bool VehicleTracker::measure(
   const types::DynamicObject corrected = normalizeYaw(in_object, motion_model_.getYawState());
 
   const bool is_bbox = (corrected.shape.type == autoware_perception_msgs::msg::Shape::BOUNDING_BOX);
-  updateKinematics(corrected, channel_info);
+  const bool kinematics_updated = updateKinematics(corrected, channel_info);
   if (channel_info.trust_position_as_center && !channel_info.trust_extension) {
     lock_nominal_length_ = true;
     // The dimensions on this channel are nominal metadata, not a per-frame
@@ -264,6 +265,13 @@ bool VehicleTracker::measure(
   }
   if (channel_info.trust_extension && is_bbox) {
     shape_model_.updateShape(corrected);
+    // A trusted normal update is allowed to revise vehicle length.  Once a
+    // center-only camera channel has enabled the prediction-time length lock,
+    // advance its reference to the newly accepted filtered length instead of
+    // restoring a stale pre-camera value on the next predict().
+    if (kinematics_updated) {
+      nominal_length_ = motion_model_.getLength();
+    }
   }
 
   // A footprint is extension data too.  A center-only channel must not mutate

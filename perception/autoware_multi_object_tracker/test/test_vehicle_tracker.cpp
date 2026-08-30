@@ -243,6 +243,68 @@ TEST(VehicleUpdatePath, CenterPositionKeepsNominalLengthThroughTurnsAndPredictio
   }
 }
 
+TEST(VehicleUpdatePath, CenterOnlyBirthLocksNominalLengthBeforeSecondMeasurement)
+{
+  constexpr double nominal_length = 4.5718;
+  const rclcpp::Time t0{0, 0, RCL_ROS_TIME};
+  auto initial = makeCenterObject(0.0, 0.0, nominal_length, 1.8);
+  initial.trust_extension = false;
+  initial.trust_position_as_center = true;
+  initial.kinematics.has_twist = true;
+  initial.twist.linear.x = 25.0;
+  initial.twist.linear.y = 3.0;
+  initial.twist_covariance.fill(0.0);
+  initial.twist_covariance[0] = 0.25;
+  initial.twist_covariance[7] = 0.25;
+
+  VehicleTracker tracker(object_model::normal_vehicle, t0, initial);
+
+  // A lateral-velocity state evolves the two bicycle endpoints differently.
+  // The center-only birth policy must therefore be active before a second
+  // measurement arrives, including through an immediate detection gap.
+  for (int i = 1; i <= 10; ++i) {
+    const rclcpp::Time time{static_cast<int64_t>(i) * 100000000, RCL_ROS_TIME};
+    ASSERT_TRUE(tracker.predict(time));
+    types::DynamicObject output;
+    ASSERT_TRUE(tracker.getTrackedObject(time, output));
+    EXPECT_NEAR(output.shape.dimensions.x, nominal_length, 1.0e-9) << "step " << i;
+  }
+}
+
+TEST(VehicleUpdatePath, TrustedNormalUpdateRefreshesLockedNominalLength)
+{
+  const rclcpp::Time t0{0, 0, RCL_ROS_TIME};
+  const rclcpp::Time t1{static_cast<int64_t>(100000000), RCL_ROS_TIME};
+  const rclcpp::Time t2{static_cast<int64_t>(200000000), RCL_ROS_TIME};
+  auto initial = makeCenterObject(0.0, 0.0, 4.0, 1.8);
+  initial.trust_extension = false;
+  initial.trust_position_as_center = true;
+  VehicleTracker tracker(object_model::normal_vehicle, t0, initial);
+
+  types::InputChannel trusted_channel{};
+  trusted_channel.index = 1;
+  trusted_channel.trust_extension = true;
+  trusted_channel.trust_orientation = false;
+  trusted_channel.trust_position_as_center = false;
+
+  auto trusted_measurement = makeCenterObject(0.0, 0.0, 6.0, 1.9);
+  trusted_measurement.channel_index = trusted_channel.index;
+  trusted_measurement.trust_extension = true;
+
+  ASSERT_TRUE(tracker.predict(t1));
+  ASSERT_TRUE(tracker.measure(trusted_measurement, t1, trusted_channel));
+
+  types::DynamicObject after_measurement;
+  ASSERT_TRUE(tracker.getTrackedObject(t1, after_measurement));
+  ASSERT_GT(after_measurement.shape.dimensions.x, initial.shape.dimensions.x + 0.1);
+
+  ASSERT_TRUE(tracker.predict(t2));
+  types::DynamicObject after_prediction;
+  ASSERT_TRUE(tracker.getTrackedObject(t2, after_prediction));
+  EXPECT_NEAR(
+    after_prediction.shape.dimensions.x, after_measurement.shape.dimensions.x, 1.0e-9);
+}
+
 TEST(TrackerExistenceProbability, RepeatedMissesDecayOnlyOverIncrementalIntervals)
 {
   constexpr float initial_probability = 0.8F;

@@ -353,6 +353,10 @@ struct DynamicObject
   // object extension (size and shape)
   autoware_perception_msgs::msg::Shape shape;
   bool trust_extension;
+  // Preserve the input-channel center-position contract through conversion,
+  // uncertainty modelling, and frame transformation so a tracker born from a
+  // center-only camera measurement can apply that policy immediately.
+  bool trust_position_as_center{false};
   double area;
 };
 

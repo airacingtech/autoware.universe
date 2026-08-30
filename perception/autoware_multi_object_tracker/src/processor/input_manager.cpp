@@ -74,9 +74,12 @@ std::optional<types::DynamicObjectList> InputStream::processMessage(
 
   types::DynamicObjectList dynamic_objects = types::toDynamicObjectList(objects, channel_.index);
 
-  // Set trust_extension information from channel configuration
+  // Preserve the channel's geometry contract on each converted object.  The
+  // tracker constructor receives the object before any later measurement call,
+  // so birth-time policy cannot be reconstructed from trust_extension alone.
   for (auto & object : dynamic_objects.objects) {
     object.trust_extension = channel_.trust_extension;
+    object.trust_position_as_center = channel_.trust_position_as_center;
   }
 
   // Model the object uncertainty only if it is not available

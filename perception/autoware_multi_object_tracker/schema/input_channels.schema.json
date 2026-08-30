@@ -55,6 +55,11 @@
               "type": "boolean",
               "default": false
             },
+            "single_opponent_mode": {
+              "type": "boolean",
+              "description": "When enabled for a known 1v1 camera channel, unmatched measurements with the same semantic label remain birth hypotheses while a live tracker exists.",
+              "default": false
+            },
             "min_confirmations": {
               "type": "integer",
               "minimum": 1,
