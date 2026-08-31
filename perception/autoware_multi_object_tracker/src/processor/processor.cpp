@@ -46,13 +46,28 @@ TrackerProcessor::TrackerProcessor(
   const TrackerAssociationConfig & association_config,
   const TrackerOverlapManagerConfig & tracker_overlap_manager_config,
   const std::vector<types::InputChannel> & channels_config, const rclcpp::Logger & logger,
-  rclcpp::Clock::SharedPtr clock)
+  rclcpp::Clock::SharedPtr clock, const double tracker_expiration_time_s,
+  const double general_vehicle_max_speed_mps)
 : tracker_configs_(tracker_configs),
   creation_config_(creation_config),
   channels_config_(channels_config),
+  tracker_expiration_time_s_(tracker_expiration_time_s),
+  general_vehicle_model_(object_model::ObjectModelType::GeneralVehicle),
   logger_(logger),
   clock_(std::move(clock))
 {
+  if (!std::isfinite(tracker_expiration_time_s_) || tracker_expiration_time_s_ <= 0.0 ||
+    tracker_expiration_time_s_ > 2.0)
+  {
+    throw std::invalid_argument("tracker_expiration_time_s must be finite and within (0, 2]");
+  }
+  if (!std::isfinite(general_vehicle_max_speed_mps) ||
+    general_vehicle_max_speed_mps <= 0.0 || general_vehicle_max_speed_mps > 120.0)
+  {
+    throw std::invalid_argument(
+            "general_vehicle_max_speed_mps must be finite and within (0, 120]");
+  }
+  general_vehicle_model_.process_limit.vel_long_max = general_vehicle_max_speed_mps;
   association_manager_ = std::make_unique<AssociationManager>(association_config, channels_config);
   tracker_overlap_manager_ =
     std::make_unique<TrackerOverlapManager>(tracker_overlap_manager_config);
@@ -523,7 +538,7 @@ std::shared_ptr<Tracker> TrackerProcessor::createNewTracker(
       case types::TrackerType::MULTIPLE_VEHICLE:
         return std::make_shared<MultipleVehicleTracker>(time, object);
       case types::TrackerType::GENERAL_VEHICLE:
-        return std::make_shared<VehicleTracker>(object_model::general_vehicle, time, object);
+        return std::make_shared<VehicleTracker>(general_vehicle_model_, time, object);
       case types::TrackerType::PEDESTRIAN_AND_BICYCLE:
         return std::make_shared<PedestrianAndBicycleTracker>(time, object);
       case types::TrackerType::NORMAL_VEHICLE:
@@ -576,11 +591,13 @@ void TrackerProcessor::removeOldTracker(const rclcpp::Time & time)
   std::unique_ptr<ScopedTimeTrack> st_ptr;
   if (time_keeper_) st_ptr = std::make_unique<ScopedTimeTrack>(__func__, *time_keeper_);
 
-  for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr) {
-    if ((*itr)->isExpired(time, adaptive_threshold_cache_, getEgoPose())) {
-      auto erase_itr = itr;
-      --itr;
-      list_tracker_.erase(erase_itr);
+  for (auto itr = list_tracker_.begin(); itr != list_tracker_.end();) {
+    if ((*itr)->isExpired(
+        time, adaptive_threshold_cache_, getEgoPose(), tracker_expiration_time_s_))
+    {
+      itr = list_tracker_.erase(itr);
+    } else {
+      ++itr;
     }
   }
 }

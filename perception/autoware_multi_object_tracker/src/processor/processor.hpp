@@ -18,6 +18,7 @@
 #include "autoware/multi_object_tracker/association/adaptive_threshold_cache.hpp"
 #include "autoware/multi_object_tracker/association/association_manager.hpp"
 #include "autoware/multi_object_tracker/association/tracker_overlap_manager.hpp"
+#include "autoware/multi_object_tracker/object_model/object_model.hpp"
 #include "autoware/multi_object_tracker/tracker/trackers/tracker_base.hpp"
 #include "autoware/multi_object_tracker/types.hpp"
 
@@ -45,7 +46,8 @@ public:
     const TrackerAssociationConfig & association_config,
     const TrackerOverlapManagerConfig & tracker_overlap_manager_config,
     const std::vector<types::InputChannel> & channels_config, const rclcpp::Logger & logger,
-    rclcpp::Clock::SharedPtr clock);
+    rclcpp::Clock::SharedPtr clock, double tracker_expiration_time_s = 1.0,
+    double general_vehicle_max_speed_mps = 140.0 / 3.6);
 
   const std::list<std::shared_ptr<Tracker>> & getListTracker() const { return list_tracker_; }
 
@@ -93,6 +95,8 @@ private:
   const TrackerConfigs tracker_configs_;
   const TrackerCreationConfig creation_config_;
   const std::vector<types::InputChannel> & channels_config_;
+  const double tracker_expiration_time_s_;
+  object_model::ObjectModel general_vehicle_model_;
 
   std::optional<geometry_msgs::msg::PoseStamped> ego_pose_;
 

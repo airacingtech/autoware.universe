@@ -104,6 +104,12 @@ param_values:
   - name: publish_merged_objects
     type: boolean
     default: false
+  - name: tracker_expiration_time_s
+    type: double
+    default: 1.0
+  - name: general_vehicle_max_speed_mps
+    type: double
+    default: 38.8888888889
   - name: ego_source
     type: string
     default: tf

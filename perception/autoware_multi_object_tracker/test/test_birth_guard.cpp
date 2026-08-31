@@ -39,6 +39,51 @@ namespace
 namespace mot = autoware::multi_object_tracker;
 using std::chrono_literals::operator""ms;
 
+mot::types::DynamicObject makeRuntimeLimitCar(
+  const rclcpp::Time & time, const double longitudinal_velocity_mps,
+  const std::string & id)
+{
+  mot::types::DynamicObject object;
+  object.uuid.uuid = stringToUUID(id);
+  object.time = time;
+  object.channel_index = 0;
+  object.existence_probability = 0.95F;
+  object.classification = {{mot::classes::Label::CAR, 1.0F}};
+  object.pose.orientation.w = 1.0;
+  object.pose_covariance.fill(0.0);
+  object.pose_covariance[0] = 0.01;
+  object.pose_covariance[7] = 0.01;
+  object.pose_covariance[35] = 0.01;
+  object.twist.linear.x = longitudinal_velocity_mps;
+  object.twist_covariance.fill(0.0);
+  object.twist_covariance[0] = 0.01;
+  object.twist_covariance[7] = 0.01;
+  object.kinematics.has_position_covariance = true;
+  object.kinematics.orientation_availability = mot::types::OrientationAvailability::AVAILABLE;
+  object.kinematics.has_twist = true;
+  object.kinematics.has_twist_covariance = true;
+  object.shape.type = autoware_perception_msgs::msg::Shape::BOUNDING_BOX;
+  object.shape.dimensions.x = 4.8;
+  object.shape.dimensions.y = 2.0;
+  object.shape.dimensions.z = 1.5;
+  object.area = object.shape.dimensions.x * object.shape.dimensions.y;
+  return object;
+}
+
+void spawnRuntimeLimitCar(
+  mot::TrackerProcessor & processor, const rclcpp::Time & time,
+  const double longitudinal_velocity_mps, const std::string & id)
+{
+  mot::types::DynamicObjectList objects;
+  objects.header.stamp = time;
+  objects.header.frame_id = "map";
+  objects.channel_index = 0;
+  objects.objects.push_back(makeRuntimeLimitCar(time, longitudinal_velocity_mps, id));
+  mot::types::AssociationResult association;
+  const mot::types::AssociatedObjects associated{objects, association};
+  processor.spawn(associated);
+}
+
 class BirthGuardTest : public ::testing::Test
 {
 protected:
@@ -578,6 +623,90 @@ TEST_F(BirthGuardTest, RejectsNonFiniteMeasurementPositions)
 
   process(time, {{30.0, 0.0}});
   EXPECT_EQ(processor_->getListTracker().size(), 1U);
+}
+
+TEST(TrackerRuntimeLimits, ProcessorAppliesConfiguredExpirationTime)
+{
+  const auto tracker_configs = createTrackerConfigs();
+  const auto creation_config = createTrackerCreationConfig();
+  const auto association_config = createTrackerAssociationConfig();
+  const auto overlap_config = createTrackerOverlapManagerConfig();
+  const auto channels = createInputChannelsConfig();
+  const auto clock = std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME);
+  constexpr double upstream_expiration_s = 1.0;
+  constexpr double extended_expiration_s = 2.0;
+  constexpr double default_general_vehicle_limit_mps = 140.0 / 3.6;
+  mot::TrackerProcessor upstream_processor(
+    tracker_configs, creation_config, association_config, overlap_config, channels,
+    rclcpp::get_logger("runtime_limits_upstream_expiration_test"), clock,
+    upstream_expiration_s, default_general_vehicle_limit_mps);
+  mot::TrackerProcessor extended_processor(
+    tracker_configs, creation_config, association_config, overlap_config, channels,
+    rclcpp::get_logger("runtime_limits_extended_expiration_test"), clock,
+    extended_expiration_s, default_general_vehicle_limit_mps);
+
+  const rclcpp::Time initial_time{1000000000LL, RCL_ROS_TIME};
+  spawnRuntimeLimitCar(upstream_processor, initial_time, 0.0, "upstream_expiration_1");
+  spawnRuntimeLimitCar(upstream_processor, initial_time, 0.0, "upstream_expiration_2");
+  spawnRuntimeLimitCar(extended_processor, initial_time, 0.0, "extended_expiration_1");
+  spawnRuntimeLimitCar(extended_processor, initial_time, 0.0, "extended_expiration_2");
+  ASSERT_EQ(upstream_processor.getListTracker().size(), 2U);
+  ASSERT_EQ(extended_processor.getListTracker().size(), 2U);
+
+  const auto after_upstream_timeout = initial_time + rclcpp::Duration(1100ms);
+  upstream_processor.prune(after_upstream_timeout);
+  extended_processor.prune(after_upstream_timeout);
+
+  EXPECT_TRUE(upstream_processor.getListTracker().empty());
+  EXPECT_EQ(extended_processor.getListTracker().size(), 2U);
+
+  extended_processor.prune(initial_time + rclcpp::Duration(2100ms));
+  EXPECT_TRUE(extended_processor.getListTracker().empty());
+}
+
+TEST(TrackerRuntimeLimits, ProcessorAppliesConfiguredGeneralVehicleSpeedCap)
+{
+  const auto tracker_configs = createTrackerConfigs();
+  auto creation_config = createTrackerCreationConfig();
+  creation_config.setCreation(
+    mot::types::ShapeType::BOUNDING_BOX, mot::classes::Label::CAR,
+    mot::types::TrackerType::GENERAL_VEHICLE);
+  const auto association_config = createTrackerAssociationConfig();
+  const auto overlap_config = createTrackerOverlapManagerConfig();
+  const auto channels = createInputChannelsConfig();
+  constexpr double tracker_expiration_s = 1.0;
+  constexpr double configured_speed_cap_mps = 100.0;
+  mot::TrackerProcessor processor(
+    tracker_configs, creation_config, association_config, overlap_config, channels,
+    rclcpp::get_logger("runtime_limits_general_vehicle_speed_test"),
+    std::make_shared<rclcpp::Clock>(RCL_STEADY_TIME), tracker_expiration_s,
+    configured_speed_cap_mps);
+
+  const rclcpp::Time initial_time{1000000000LL, RCL_ROS_TIME};
+  spawnRuntimeLimitCar(processor, initial_time, 130.0, "initial_vehicle");
+  ASSERT_EQ(processor.getListTracker().size(), 1U);
+  const auto tracker = processor.getListTracker().front();
+  ASSERT_EQ(tracker->getTrackerType(), mot::types::TrackerType::GENERAL_VEHICLE);
+  mot::types::DynamicObject birth_output;
+  ASSERT_TRUE(tracker->getTrackedObject(initial_time, birth_output, false));
+  EXPECT_NEAR(birth_output.twist.linear.x, configured_speed_cap_mps, 1.0e-6);
+
+  const auto update_time = initial_time + rclcpp::Duration(100ms);
+  ASSERT_TRUE(tracker->predict(update_time));
+  auto measurement = makeRuntimeLimitCar(update_time, 130.0, "fast_measurement");
+  mot::types::DynamicObjectList objects;
+  objects.header.stamp = update_time;
+  objects.header.frame_id = "map";
+  objects.channel_index = 0;
+  objects.objects.push_back(measurement);
+  mot::types::AssociationResult association;
+  association.add(tracker->getUUID(), measurement.uuid);
+  const mot::types::AssociatedObjects associated{objects, association};
+  processor.update(associated);
+
+  mot::types::DynamicObject output;
+  ASSERT_TRUE(tracker->getTrackedObject(update_time, output, false));
+  EXPECT_NEAR(output.twist.linear.x, configured_speed_cap_mps, 1.0e-6);
 }
 
 }  // namespace
