@@ -141,6 +141,20 @@
           "description": "KEEP_LAST history depth for each detected-object subscription.",
           "default": 1
         },
+        "tracker_expiration_time_s": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 2.0,
+          "description": "Hard tracker expiry after the last measurement, in seconds. Startup-only.",
+          "default": 1.0
+        },
+        "general_vehicle_max_speed_mps": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 120.0,
+          "description": "Longitudinal speed limit for GeneralVehicle motion models, in m/s. Startup-only.",
+          "default": 38.8888888889
+        },
         "world_frame_id": {
           "type": "string",
           "description": "Object kinematics definition frame.",

@@ -50,6 +50,13 @@ struct MultiObjectTrackerParameters
   bool enable_odometry_uncertainty;
   bool publish_processing_time_detail;
   bool publish_merged_objects;
+  // Maximum bounded prediction/coast interval after the most recent
+  // measurement. Vehicle trackers continue their bicycle-model linear/yaw-rate
+  // prediction during this interval; the default preserves upstream behavior.
+  double tracker_expiration_time_s{1.0};
+  // GeneralVehicle is the tracker used for CAR detections. Keep the upstream
+  // 140 km/h default unless a high-speed application explicitly raises it.
+  double general_vehicle_max_speed_mps{140.0 / 3.6};
 
   // ego pose sourcing
   EgoSource ego_source;

@@ -130,7 +130,8 @@ public:
     const std::optional<rclcpp::Time> & time) const;
   bool isExpired(
     const rclcpp::Time & time, const AdaptiveThresholdCache & cache,
-    const std::optional<geometry_msgs::msg::Pose> & ego_pose) const;
+    const std::optional<geometry_msgs::msg::Pose> & ego_pose,
+    double expiration_time_s = 1.0) const;
   float getKnownObjectProbability() const;
   double getPositionCovarianceDeterminant() const;
   virtual types::TrackerType getTrackerType() const { return tracker_type_; }

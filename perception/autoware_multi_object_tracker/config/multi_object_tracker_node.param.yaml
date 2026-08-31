@@ -8,6 +8,10 @@
     publish_on_timer: false
     publish_rate: 10.0
 
+    # Startup-only motion/coast limits. Defaults preserve upstream road-vehicle behavior.
+    tracker_expiration_time_s: 1.0
+    general_vehicle_max_speed_mps: 38.8888888889
+
     # ego pose source: "tf" (look up from TF tree) or "odometry" (interpolate from ~/input/odometry)
     ego_source: tf
     # delay compensation, least -> most:

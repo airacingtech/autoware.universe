@@ -85,6 +85,31 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
   params_.publish_processing_time_detail =
     declare_parameter<bool>("publish_processing_time_detail");
   params_.publish_merged_objects = declare_parameter<bool>("publish_merged_objects");
+  rcl_interfaces::msg::ParameterDescriptor expiration_descriptor;
+  expiration_descriptor.description =
+    "Hard tracker expiry after the last measurement, in seconds. Startup-only.";
+  expiration_descriptor.read_only = true;
+  params_.tracker_expiration_time_s = declare_parameter<double>(
+    "tracker_expiration_time_s", 1.0, expiration_descriptor);
+  if (!std::isfinite(params_.tracker_expiration_time_s) ||
+    params_.tracker_expiration_time_s <= 0.0 || params_.tracker_expiration_time_s > 2.0)
+  {
+    throw std::invalid_argument(
+            "tracker_expiration_time_s must be finite and within (0, 2]");
+  }
+  rcl_interfaces::msg::ParameterDescriptor speed_descriptor;
+  speed_descriptor.description =
+    "Longitudinal speed limit for GeneralVehicle motion models, in m/s. Startup-only.";
+  speed_descriptor.read_only = true;
+  params_.general_vehicle_max_speed_mps = declare_parameter<double>(
+    "general_vehicle_max_speed_mps", 140.0 / 3.6, speed_descriptor);
+  if (!std::isfinite(params_.general_vehicle_max_speed_mps) ||
+    params_.general_vehicle_max_speed_mps <= 0.0 ||
+    params_.general_vehicle_max_speed_mps > 120.0)
+  {
+    throw std::invalid_argument(
+            "general_vehicle_max_speed_mps must be finite and within (0, 120]");
+  }
 
   // define input channel parameters. the channel size is defined by this array.
   constexpr size_t MAX_INPUT_CHANNELS = 12;

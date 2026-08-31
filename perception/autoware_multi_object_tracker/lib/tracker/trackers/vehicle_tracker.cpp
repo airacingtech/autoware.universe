@@ -141,6 +141,10 @@ VehicleTracker::VehicleTracker(
 
     motion_model_.initialize(
       time, x, y, yaw, pose_cov, vel_x, vel_x_cov, vel_y, vel_y_cov, initial_length);
+    // Apply the configured physical limits at birth as well as after later
+    // measurement updates. Otherwise an over-limit input twist survives until
+    // the next measurement callback.
+    motion_model_.limitStates();
     motion_model_.setZ(object.pose.position.z);
   }
 }
